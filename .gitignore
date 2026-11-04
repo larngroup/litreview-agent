@@ -218,3 +218,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Literature Agent - Stage 1
+
+# Generated datasets and screening results
+*.json
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# API keys and credentials
+*.key
