@@ -21,3 +21,12 @@ litagent screen data/papers_dataset.json
 - Screening uses titles and abstracts only. It is a preliminary filter, not a full-text eligibility decision.
 - Search results depend on the coverage of the sources used; they are never an exhaustive survey of the literature.
 - When a hosted provider such as Groq is used, titles and abstracts are sent to that external service.
+- We are using Groq's free plan limits so it isn´t recommended to do many requests or the status will be 'failed'. If that happens search on data folder file evaluated_dataset.json on the last screening_error you can find the time to reset the RPM limit.
+- We using the model openai/gpt-oss-20b its have:
+
+| Metric | Meaning | Rate Limit |
+| --- | --- | --- |
+| **RPM** | *Requests Per Minute*  | 30 |
+| **RPD** | *Requests Per Day*  | 1.000 |
+| **TPM** | *Tokens Per Minute*  | 8.000 |
+| **TPD** | *Tokens Per Day* | 200.000 |
