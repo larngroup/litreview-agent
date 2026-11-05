@@ -229,3 +229,6 @@ __marimo__/
 
 # API keys and credentials
 *.key
+
+# future db
+data/literature.db
