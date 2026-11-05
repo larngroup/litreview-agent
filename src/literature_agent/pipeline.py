@@ -22,6 +22,77 @@ def topic_criteria_hash(topic: str, prompt_version: str = PROMPT_VERSION) -> str
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
+# TEMPORARY RUN SEARCH THAT SIMULATES CTRL+C INTERRUPT, FOR TESTING PURPOSES
+"""
+def run_search(conn, project_id: int, query: str, limit: int,
+               search_fn: Callable = search_openalex) -> dict:
+
+    run_id = db.start_search_run(conn, project_id, "openalex", query, limit)
+
+    print(f"[DEBUG] Run {run_id} criada com status='running'", flush=True)
+
+    db.log_event(
+        conn, project_id, "info", "search_started",
+        f"OpenAlex search: {query!r}",
+        {"run_id": run_id, "limit": limit},
+    )
+
+    try:
+        print("[DEBUG] A entrar no bloco try", flush=True)
+
+        # TESTE TEMPORÁRIO — simula Ctrl+C sem chamar a API
+        print("[DEBUG] A simular KeyboardInterrupt!", flush=True)
+        raise KeyboardInterrupt
+
+        papers = search_fn(query, limit=limit)
+
+    except Exception as exc:
+        print("[DEBUG] Entrou no except Exception", flush=True)
+
+        db.finish_search_run(
+            conn, run_id, status="failed",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        print("[DEBUG] finish_search_run(status='failed') executado", flush=True)
+
+        db.log_event(
+            conn, project_id, "error", "search_failed",
+            str(exc), {"run_id": run_id},
+        )
+        raise
+
+    new = duplicates = 0
+    for paper in papers:
+        result = db.add_paper(conn, project_id, run_id, paper)
+        new += result.new_in_project
+        duplicates += not result.new_in_project
+
+    print("[DEBUG] Antes de finish_search_run(status='completed')", flush=True)
+
+    db.finish_search_run(
+        conn, run_id, status="completed",
+        n_retrieved=len(papers),
+        n_new=new,
+        n_duplicates=duplicates,
+    )
+
+    print("[DEBUG] finish_search_run(status='completed') executado", flush=True)
+
+    summary = {
+        "run_id": run_id,
+        "retrieved": len(papers),
+        "new": new,
+        "duplicates": duplicates,
+        "without_abstract": sum(not p.has_abstract for p in papers),
+    }
+
+    db.log_event(
+        conn, project_id, "info", "search_completed",
+        "OpenAlex search finished", summary,
+    )
+    return summary
+"""
+
 def run_search(conn, project_id: int, query: str, limit: int,
                search_fn: Callable = search_openalex) -> dict:
     run_id = db.start_search_run(conn, project_id, "openalex", query, limit)
