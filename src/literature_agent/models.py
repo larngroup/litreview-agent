@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
@@ -25,6 +27,19 @@ def normalise_doi(doi: object) -> str | None:
             value = value[len(prefix):]
     value = value.strip()
     return value if value.startswith("10.") and "/" in value else None
+
+
+def title_key(title: object) -> str | None:
+    """Matching key for titles: accents removed, lower-case, letters and digits only.
+
+    'Human-in-the-Loop  ML!' and 'human in the loop ml' give the same key.
+    Titles shorter than 20 characters after cleaning are too generic to match on.
+    """
+    if not isinstance(title, str):
+        return None
+    ascii_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
+    key = re.sub(r"[^a-z0-9]+", "", ascii_title.lower())
+    return key if len(key) >= 20 else None
 
 
 class Paper(BaseModel):
@@ -78,3 +93,7 @@ class Paper(BaseModel):
     @property
     def display_title(self) -> str:
         return self.title or "(no title)"
+
+    @property
+    def title_key(self) -> str | None:
+        return title_key(self.title)

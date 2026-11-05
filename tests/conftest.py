@@ -117,3 +117,20 @@ def llm_server():
     server = FakeLLMServer()
     yield server
     server.close()
+
+
+@pytest.fixture
+def conn():
+    """A fresh in-memory database for each test."""
+    from literature_agent.storage import database as db
+
+    connection = db.connect(":memory:")
+    yield connection
+    connection.close()
+
+
+@pytest.fixture
+def project_id(conn):
+    from literature_agent.storage import database as db
+
+    return db.create_project(conn, "test", "human-in-the-loop machine learning")

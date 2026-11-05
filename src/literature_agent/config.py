@@ -41,12 +41,14 @@ class Settings:
     llm_timeout_seconds: float
     llm_max_retries: int
     data_dir: Path
+    db_path: Path
 
 
 def load_settings(env_file: str | os.PathLike | None = ".env") -> Settings:
     """Read settings. Real environment variables win over values in the .env file."""
     if env_file and Path(env_file).exists():
         load_dotenv(env_file, override=False)
+    data_dir = Path(_str("LITAGENT_DATA_DIR", "data"))
     return Settings(
         openalex_api_key=_str("OPENALEX_API_KEY"),
         contact_email=_str("CONTACT_EMAIL"),
@@ -56,5 +58,6 @@ def load_settings(env_file: str | os.PathLike | None = ".env") -> Settings:
         llm_temperature=_float("LLM_TEMPERATURE", 0.0),
         llm_timeout_seconds=_float("LLM_TIMEOUT_SECONDS", 60.0),
         llm_max_retries=_int("LLM_MAX_RETRIES", 2),
-        data_dir=Path(_str("LITAGENT_DATA_DIR", "data")),
+        data_dir=data_dir,
+        db_path=Path(_str("LITAGENT_DB_PATH", str(data_dir / "literature.db"))),
     )
