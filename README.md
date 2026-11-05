@@ -8,40 +8,54 @@ A local-first assistant for academic literature discovery and AI-assisted releva
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-cp .env.example .env               # then edit .env and add your keys
-pytest
-litagent project create <project_name> --topic "<Topic to search>"   # create a project
-#for example: litagent project create hitl --topic "human-in-the-loop machine learning"
+cp -n .env.example .env            # Only if .env does not exist; then add your API keys
+pytest -q
 
-litagent search "<Topic to found relevance>" --project <project_name> --limit <select searching limit>    #search into the database
-#for example: litagent search "Active Learning" --project hitl --limit 10
+# Database workflow (Stage 3)
 
-litagent screen --project <project_name>            #
-#for example: litagent screen --project hitl         
+litagent project create <project_name> --topic "<research_topic>"  # Create a project
+# Example: litagent project create hitl --topic "human-in-the-loop machine learning"
 
-litagent status --project <project_name>            #status: permite consultar o estado atual sem executar uma nova pesquisa.
-#for example: litagent status --project hitl        
+litagent project list              # List existing projects
 
-# import JSON files from the original v4 notebook into a separate project -> see your path to v4
-litagent import-json path/to/v4/papers_dataset.json --project hitl-v4 --evaluated path/to/v4/evaluated_dataset.json --legacy-topic "Human in the loop"
-litagent status --project hitl-v4   # to check
+litagent search "<query>" --project <project_name> --limit 10  # Search OpenAlex and save papers to the project
+# Example: litagent search "Active Learning" --project hitl --limit 10
 
+litagent screen --project <project_name>  # Screen pending papers using the project's topic
+# Example: litagent screen --project hitl
 
-#NOTAS cli
-#Database workflow (new in Stage 3):
-    litagent project create NAME --topic "..."
-    litagent search "query" --project NAME --limit 100
-    litagent screen --project NAME [--retry-failed]     #se um artigo já ficou registado como failed, não é repetido automaticamente numa execução normal. Para o repetir, tens de usar a flag --retry-failed
-    litagent status --project NAME
-    litagent import-json --project NAME papers.json [--evaluated evaluated.json]
+litagent screen --project <project_name> --retry-failed  # Retry failed screenings
+litagent screen --project <project_name> --topic "Active Learning"  # Screen using a different topic
 
-#JSON workflow from Stage 2 (still works, no --project):
-    litagent search "query" --out data/papers_dataset.json
-    litagent screen data/papers_dataset.json --out data/evaluated_dataset.json
+litagent status --project <project_name>  # View project status without running searches
+# Example: litagent status --project hitl
 
-#README FILE TO FINISH - USED NOW TO NOTES
+# Import JSON files from the original v4 notebook
+litagent import-json data/v4/papers_dataset.json --project hitl-v4 --evaluated data/v4/evaluated_dataset.json --legacy-topic "Human in the loop"
+litagent status --project hitl-v4
+
+# JSON workflow (Stage 2 — still supported, without --project)
+
+litagent search "human-in-the-loop machine learning" --limit 50 --out data/papers_dataset.json
+litagent screen data/papers_dataset.json --out data/evaluated_dataset.json
+
+# Screen JSON produced by the Stage 1 notebook
+litagent screen notebooks/papers_dataset.json
+
+# Notes:
+# --limit limits each search, not the total papers stored in a project.
+# ok means successfully screened, not necessarily relevant.
+# Screening results are saved incrementally; unfinished work can be continued.
+# Ctrl+C marks project searches as interrupted; repeat the search to try again.
+# Legacy screenings are preserved separately and may be re-screened.
+# TODO Stage 5: 
+- Fix `legacy_import.py` to preserve `skipped_no_abstract` as `skipped` / `uncertain`, instead of incorrectly marking it as `failed`.
+- Add a regression test for imported screening statuses.
+- Keep legacy screenings separate using `criteria_hash="legacy"`.
+- Verify that `litagent status` reports screenings for the current criteria only, as planned in Stage 5.
+- Ensure imported historical results remain available after re-screening.
 ```
 
 ## Important limitations
