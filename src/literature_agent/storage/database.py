@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS search_runs (
     query TEXT NOT NULL,
     requested_limit INTEGER,
     parameters TEXT NOT NULL DEFAULT '{}',
-    status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
+    status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'interrupted')),
     started_at TEXT NOT NULL,
     finished_at TEXT,
     n_retrieved INTEGER NOT NULL DEFAULT 0,

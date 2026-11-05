@@ -233,6 +233,11 @@ def main(argv: list[str] | None = None) -> int:
                         format="%(levelname)s %(message)s")
     try:
         return args.func(args, load_settings())
+    
+    except KeyboardInterrupt:
+        print("\nSearch or screening interrupted by user (Ctrl+C).")
+        return 130
+    
     except ValueError as exc:
         print(f"ERROR: {exc}")
         return 2
