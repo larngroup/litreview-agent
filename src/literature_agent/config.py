@@ -40,6 +40,8 @@ class Settings:
     llm_temperature: float
     llm_timeout_seconds: float
     llm_max_retries: int
+    http_timeout_seconds: float
+    http_max_retries: int
     data_dir: Path
     db_path: Path
 
@@ -58,6 +60,8 @@ def load_settings(env_file: str | os.PathLike | None = ".env") -> Settings:
         llm_temperature=_float("LLM_TEMPERATURE", 0.0),
         llm_timeout_seconds=_float("LLM_TIMEOUT_SECONDS", 60.0),
         llm_max_retries=_int("LLM_MAX_RETRIES", 2),
+        http_timeout_seconds=_float("HTTP_TIMEOUT_SECONDS", 30.0),
+        http_max_retries=_int("HTTP_MAX_RETRIES", 4),
         data_dir=data_dir,
         db_path=Path(_str("LITAGENT_DB_PATH", str(data_dir / "literature.db"))),
     )

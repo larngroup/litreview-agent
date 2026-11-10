@@ -2,12 +2,12 @@ import json
 
 from literature_agent import cli
 from literature_agent.models import Paper
-from tests.conftest import FakeProvider
+from tests.conftest import FakeProvider, FakeSource
 
 
 def test_search_then_screen(tmp_path, monkeypatch):
     paper = Paper(source="openalex", source_id="W1", title="T", abstract="A", query="hitl")
-    monkeypatch.setattr(cli, "search_openalex", lambda query, limit: [paper])
+    monkeypatch.setattr(cli, "make_source", lambda name, settings: FakeSource(name, [paper]))
     monkeypatch.setenv("LITAGENT_DATA_DIR", str(tmp_path))
     out = tmp_path / "papers.json"
     assert cli.main(["search", "hitl", "--limit", "1", "--out", str(out)]) == 0

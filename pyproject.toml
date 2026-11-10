@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "literature-agent"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local-first assistant for literature discovery and screening"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
-    "pyalex>=0.21,<1",
+    "httpx>=0.27,<1",
     "openai>=1.40,<4",
     "pydantic>=2.6,<3",
     "python-dotenv>=1.0,<2",

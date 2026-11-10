@@ -2,13 +2,13 @@ import json
 
 from literature_agent import cli
 from literature_agent.models import Paper
-from tests.conftest import FakeProvider
+from tests.conftest import FakeProvider, FakeSource
 
 
 def test_database_workflow(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("LITAGENT_DB_PATH", str(tmp_path / "lit.db"))
     paper = Paper(source="openalex", source_id="W1", title="Some long enough paper title", abstract="A")
-    monkeypatch.setattr(cli, "search_openalex", lambda query, limit: [paper])
+    monkeypatch.setattr(cli, "make_source", lambda name, settings: FakeSource(name, [paper]))
     fake = FakeProvider(['{"is_relevant": true, "reason": "fits"}'])
     monkeypatch.setattr(cli.GroqProvider, "from_settings", classmethod(lambda cls, s: fake))
 

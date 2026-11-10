@@ -2,7 +2,7 @@
 
 Database workflow (new in Stage 3):
     litagent project create NAME --topic "..."
-    litagent search "query" --project NAME --limit 100
+    litagent search "query" --project NAME --limit 100 [--source openalex --source crossref]
     litagent screen --project NAME [--retry-failed]
     litagent status --project NAME
     litagent import-json --project NAME papers.json [--evaluated evaluated.json]
@@ -23,7 +23,7 @@ from pathlib import Path
 
 from . import pipeline
 from .config import load_settings
-from .discovery.openalex import configure_pyalex, search_openalex
+from .discovery import SOURCE_NAMES, make_source
 from .models import Paper, utc_now
 from .providers.groq import GroqProvider, LLMError
 from .screening.relevance import screen_papers
@@ -72,22 +72,26 @@ def cmd_project_list(args, settings) -> int:
 # --------------------------------------------------------------------------- search
 
 def cmd_search(args, settings) -> int:
-    configure_pyalex(settings.openalex_api_key, settings.contact_email)
-    if not settings.openalex_api_key:
+    source_names = args.source or ["openalex"]
+    if "openalex" in source_names and not settings.openalex_api_key:
         print("WARNING: OPENALEX_API_KEY not set; OpenAlex allows only a small daily budget without a key.")
+    if "crossref" in source_names and not settings.contact_email:
+        print("WARNING: CONTACT_EMAIL not set; Crossref will use its slower public pool.")
+    sources = [make_source(name, settings) for name in source_names]
     if args.project:
         conn = _open_db(settings)
         project = db.require_project(conn, args.project)
-        summary = pipeline.run_search(conn, project["id"], args.query, args.limit, search_fn=search_openalex)
-        print(json.dumps(summary, indent=2))
-        return 0
+        summaries = pipeline.run_multi_search(conn, project["id"], args.query, args.limit, sources)
+        print(json.dumps(summaries, indent=2))
+        return 1 if any("error" in s for s in summaries) else 0
 
+    # JSON mode (Stage 2 behaviour): records from all sources are written as-is, no deduplication.
     started = utc_now()
-    papers = search_openalex(args.query, limit=args.limit)
+    papers = [paper for source in sources for paper in source.search(args.query, limit=args.limit)]
     out = Path(args.out)
     _write_json([p.model_dump(mode="json") for p in papers], out)
     run_log = {
-        "source": "openalex", "query": args.query, "requested_limit": args.limit,
+        "sources": source_names, "query": args.query, "requested_limit_per_source": args.limit,
         "started_at": started.isoformat(), "finished_at": utc_now().isoformat(),
         "records": len(papers), "without_abstract": sum(not p.has_abstract for p in papers),
         "output_file": str(out),
@@ -198,8 +202,10 @@ def build_parser() -> argparse.ArgumentParser:
     create.set_defaults(func=cmd_project_create)
     project_sub.add_parser("list").set_defaults(func=cmd_project_list)
 
-    search = sub.add_parser("search", help="search OpenAlex")
+    search = sub.add_parser("search", help="search scholarly sources")
     search.add_argument("query")
+    search.add_argument("--source", action="append", choices=SOURCE_NAMES,
+                        help="repeat to use several sources (default: openalex)")
     search.add_argument("--project", help="store results in this project (database)")
     search.add_argument("--limit", type=int, default=100)
     search.add_argument("--out", default="data/papers_dataset.json", help="JSON output (without --project)")
@@ -227,17 +233,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format="%(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s %(message)s",
+    )
+
     try:
         return args.func(args, load_settings())
-    
     except KeyboardInterrupt:
         print("\nSearch or screening interrupted by user (Ctrl+C).")
         return 130
-    
     except ValueError as exc:
         print(f"ERROR: {exc}")
         return 2

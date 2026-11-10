@@ -11,7 +11,6 @@ import json
 from collections import Counter
 from collections.abc import Callable
 
-from .discovery.openalex import search_openalex
 from .screening.relevance import PROMPT_VERSION, screen_paper
 from .storage import database as db
 
@@ -22,28 +21,43 @@ def topic_criteria_hash(topic: str, prompt_version: str = PROMPT_VERSION) -> str
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def run_search(conn, project_id: int, query: str, limit: int,
-               search_fn: Callable = search_openalex) -> dict:
-    run_id = db.start_search_run(conn, project_id, "openalex", query, limit)
 
+def run_search(conn, project_id: int, query: str, limit: int, source) -> dict:
+    """Run ONE source, store records with provenance, and log the run.
+    PRESERVA O KeyboardInterrupt do stage 3: se o utilizador carregar em Ctrl+C, a pesquisa é interrompida e o estado é guardado.
+    A função run_multi_search() já captura erros normais individualmente, 
+    mas não captura KeyboardInterrupt. Isso é desejável: se carregares em Ctrl+C durante a pesquisa OpenAlex,
+    o programa interrompe a operação, em vez de avançar automaticamente para o Crossref.
+
+    Como o novo HTTP obtém primeiro os resultados da API e só depois os guarda,
+    uma interrupção durante a chamada HTTP pode não preservar os artigos dessa chamada.
+    Mas agora a run fica corretamente marcada como interrupted."""
+
+
+    run_id = db.start_search_run(conn, project_id, source.name, query, limit)
     db.log_event(
         conn, project_id, "info", "search_started",
-        f"OpenAlex search: {query!r}",
+        f"{source.name} search: {query!r}",
         {"run_id": run_id, "limit": limit},
     )
 
-    try:
-        papers = search_fn(query, limit=limit)
+    new = duplicates = 0
+    matched = Counter()
+    papers = []
 
-        new = duplicates = 0
+    try:
+        papers = source.search(query, limit=limit)
+
         for paper in papers:
             result = db.add_paper(conn, project_id, run_id, paper)
             new += result.new_in_project
             duplicates += not result.new_in_project
 
+            if result.matched_by:
+                matched[result.matched_by] += 1
+
         db.finish_search_run(
-            conn, run_id,
-            status="completed",
+            conn, run_id, status="completed",
             n_retrieved=len(papers),
             n_new=new,
             n_duplicates=duplicates,
@@ -53,46 +67,61 @@ def run_search(conn, project_id: int, query: str, limit: int,
         db.finish_search_run(
             conn, run_id,
             status="interrupted",
+            n_retrieved=new + duplicates,
+            n_new=new,
+            n_duplicates=duplicates,
             error="Search interrupted by user (Ctrl+C)",
         )
-
         db.log_event(
-            conn, project_id, "warning",
-            "search_interrupted",
-            "OpenAlex search interrupted by user",
-            {"run_id": run_id},
+            conn, project_id, "warning", "search_interrupted",
+            f"{source.name} search interrupted by user",
+            {"run_id": run_id, "source": source.name},
         )
-        raise   # re-raise the KeyboardInterrupt so that the CLI/web interface can handle it appropriately.
+        raise
 
     except Exception as exc:
         db.finish_search_run(
             conn, run_id,
             status="failed",
+            n_retrieved=new + duplicates,
+            n_new=new,
+            n_duplicates=duplicates,
             error=f"{type(exc).__name__}: {exc}",
         )
         db.log_event(
-            conn, project_id, "error",
-            "search_failed",
+            conn, project_id, "error", "search_failed",
             str(exc),
-            {"run_id": run_id},
+            {"run_id": run_id, "source": source.name},
         )
         raise
 
     summary = {
         "run_id": run_id,
+        "source": source.name,
         "retrieved": len(papers),
         "new": new,
         "duplicates": duplicates,
+        "matched_by": dict(matched),
         "without_abstract": sum(not p.has_abstract for p in papers),
     }
 
     db.log_event(
-        conn, project_id, "info",
-        "search_completed",
-        "OpenAlex search finished",
-        summary,
+        conn, project_id, "info", "search_completed",
+        f"{source.name} search finished", summary,
     )
     return summary
+
+
+
+def run_multi_search(conn, project_id: int, query: str, limit: int, sources) -> list[dict]:
+    """Run several sources. A failing source is recorded and does not stop the others."""
+    summaries = []
+    for source in sources:
+        try:
+            summaries.append(run_search(conn, project_id, query, limit, source))
+        except Exception as exc:
+            summaries.append({"source": source.name, "error": f"{type(exc).__name__}: {exc}"})
+    return summaries
 
 
 def run_screening(conn, project_id: int, provider, topic: str | None = None,

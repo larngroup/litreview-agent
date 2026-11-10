@@ -1,17 +1,22 @@
-"""OpenAlex search, moved from the notebook (logic unchanged since Stage 1)."""
+"""OpenAlex search over plain HTTP.
+
+Why we no longer use pyalex here (it is still used in the Stage 1 notebook):
+* pyalex 0.21 sets no request timeout, so a stalled connection can block forever;
+* we need the same retry/pacing behaviour for every source;
+* we can test it offline with an injected httpx client.
+`reconstruct_abstract` and `work_to_paper` are unchanged from Stage 2.
+"""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable
-
-import pyalex
-from pyalex import Works
 
 from ..models import Paper, utc_now
+from .http import PoliteClient
 
 log = logging.getLogger(__name__)
 
+OPENALEX_URL = "https://api.openalex.org/works"
 OPENALEX_FIELDS = [
     "id", "doi", "title", "publication_year", "authorships",
     "abstract_inverted_index", "keywords",
@@ -59,48 +64,47 @@ def work_to_paper(work: dict, query: str, retrieved_at=None) -> Paper:
     )
 
 
-def configure_pyalex(api_key: str | None, contact_email: str | None, max_retries: int = 3) -> None:
-    pyalex.config.api_key = api_key
-    pyalex.config.email = contact_email
-    pyalex.config.max_retries = max_retries
-    pyalex.config.retry_backoff_factor = 0.5
-    pyalex.config.retry_http_codes = [429, 500, 502, 503, 504]
-
-
-def _default_pager(query: str, per_page: int, n_max: int) -> Iterable[Iterable[dict]]:
-    return Works().search(query).select(OPENALEX_FIELDS).paginate(per_page=per_page, n_max=n_max)
-
-
-def search_openalex(
-    query: str,
-    limit: int = 100,
-    pager_factory: Callable[[str, int, int], Iterable[Iterable[dict]]] = _default_pager,
-) -> list[Paper]:
-    """Return at most `limit` unique papers for `query`.
-
-    `pager_factory` exists so tests can replace the network call with fake pages.
-    """
+def validate_search_args(query: str, limit: int) -> str:
     query = (query or "").strip()
     if not query:
         raise ValueError("The search query is empty.")
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_RECORDS:
         raise ValueError(f"limit must be an integer between 1 and {MAX_RECORDS}, got {limit!r}")
+    return query
 
-    retrieved_at = utc_now()
-    papers: list[Paper] = []
-    seen: set[str] = set()
-    for page_number, page in enumerate(pager_factory(query, min(limit, 200), limit), start=1):
-        for work in page:
-            paper = work_to_paper(work, query, retrieved_at)
-            key = paper.source_id or paper.doi
-            if key and key in seen:
-                continue
-            if key:
-                seen.add(key)
-            papers.append(paper)
-            if len(papers) >= limit:
+
+class OpenAlexSource:
+    name = "openalex"
+
+    def __init__(self, http: PoliteClient, api_key: str | None = None):
+        self.http = http
+        self.api_key = api_key
+
+    def search(self, query: str, limit: int = 100) -> list[Paper]:
+        query = validate_search_args(query, limit)
+        retrieved_at = utc_now()
+        params = {"search": query, "per_page": min(limit, 200), "cursor": "*",
+                  "select": ",".join(OPENALEX_FIELDS)}
+        if self.api_key:
+            params["api_key"] = self.api_key   # documented way to authenticate
+        papers: list[Paper] = []
+        seen: set[str] = set()
+        while len(papers) < limit:
+            data = self.http.get_json(OPENALEX_URL, params)
+            results = data.get("results") or []
+            for work in results:
+                paper = work_to_paper(work, query, retrieved_at)
+                key = paper.source_id or paper.doi
+                if key and key in seen:
+                    continue
+                if key:
+                    seen.add(key)
+                papers.append(paper)
+                if len(papers) >= limit:
+                    break
+            next_cursor = (data.get("meta") or {}).get("next_cursor")
+            log.info("OpenAlex: %d papers so far", len(papers))
+            if not results or not next_cursor:
                 break
-        log.info("OpenAlex page %d: %d papers so far", page_number, len(papers))
-        if len(papers) >= limit:
-            break
-    return papers
+            params["cursor"] = next_cursor
+        return papers

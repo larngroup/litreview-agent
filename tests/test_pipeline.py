@@ -2,24 +2,21 @@ import pytest
 
 from literature_agent import pipeline
 from literature_agent.storage import database as db
-from tests.conftest import FakeProvider
+from tests.conftest import FakeProvider, FakeSource
 
 
 def test_run_search_stores_papers_and_run(conn, project_id, make_paper):
     papers = [make_paper(), make_paper(source_id="W2", doi="10.1/b", title="Another long paper title here")]
-    summary = pipeline.run_search(conn, project_id, "hitl", 10, search_fn=lambda q, limit: papers)
+    summary = pipeline.run_search(conn, project_id, "hitl", 10, FakeSource("openalex", papers))
     assert summary["retrieved"] == 2 and summary["new"] == 2
-    again = pipeline.run_search(conn, project_id, "hitl", 10, search_fn=lambda q, limit: papers)
+    again = pipeline.run_search(conn, project_id, "hitl", 10, FakeSource("openalex", papers))
     assert again["new"] == 0 and again["duplicates"] == 2
     assert [r["status"] for r in db.list_search_runs(conn, project_id)] == ["completed", "completed"]
 
 
 def test_failed_search_is_recorded(conn, project_id):
-    def boom(q, limit):
-        raise ConnectionError("network down")
-
     with pytest.raises(ConnectionError):
-        pipeline.run_search(conn, project_id, "q", 5, search_fn=boom)
+        pipeline.run_search(conn, project_id, "q", 5, FakeSource("openalex", error=ConnectionError("network down")))
     run = db.list_search_runs(conn, project_id)[0]
     assert run["status"] == "failed" and "network down" in run["error"]
 

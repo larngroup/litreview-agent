@@ -134,3 +134,35 @@ def project_id(conn):
     from literature_agent.storage import database as db
 
     return db.create_project(conn, "test", "human-in-the-loop machine learning")
+
+
+class FakeSource:
+    """A search source that returns fixed papers (or raises an exception)."""
+
+    def __init__(self, name, papers=None, error=None):
+        self.name = name
+        self.papers = papers or []
+        self.error = error
+        self.calls = []
+
+    def search(self, query, limit=100):
+        self.calls.append((query, limit))
+        if self.error:
+            raise self.error
+        return self.papers[:limit]
+
+
+def mock_http(routes):
+    """PoliteClient whose requests are answered by `routes(request) -> httpx.Response`."""
+    import httpx
+
+    from literature_agent.discovery.http import PoliteClient
+
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return routes(request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return PoliteClient(client=client, max_retries=2, sleep=lambda s: None), seen
