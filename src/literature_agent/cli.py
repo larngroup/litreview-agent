@@ -240,6 +240,10 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(message)s",
     )
+    
+    # Silence httpx and httpcore debug logs, which are showing API keys in the logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     try:
         return args.func(args, load_settings())

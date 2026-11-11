@@ -31,7 +31,7 @@ def make_source(name: str, settings: Settings, http: PoliteClient | None = None)
                               api_key=settings.openalex_api_key)
     if name == "crossref":
         # Crossref: ~1 request/s anonymously, more in the polite pool (with mailto).
-        interval = 0.5 if settings.contact_email else 1.0
+        interval = 0.5 if settings.contact_email else 1.1
         return CrossrefSource(http or PoliteClient(min_interval_seconds=interval, **common),
                               contact_email=settings.contact_email)
     raise ValueError(f"Unknown source {name!r}. Choose from: {', '.join(SOURCE_NAMES)}")
