@@ -329,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(message)s")
     
-    # Silence httpx and httpcore debug logs, which are showing API keys in the logs.
+    # Silence httpx and httpcore debug logs, which are showing API keys in the logs. - added at stage 4
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     
