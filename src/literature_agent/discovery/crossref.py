@@ -73,7 +73,8 @@ class CrossrefSource:
         query = validate_search_args(query, limit)
         retrieved_at = utc_now()
         params = {"query": query, "rows": min(limit, 100), "cursor": "*",
-                  "select": ",".join(CROSSREF_FIELDS)}
+          "sort": "score", "order": "desc",
+          "select": ",".join(CROSSREF_FIELDS)}
         if self.contact_email:
             params["mailto"] = self.contact_email
         papers: list[Paper] = []
