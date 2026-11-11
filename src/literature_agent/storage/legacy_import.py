@@ -2,6 +2,9 @@
 
 Nothing is deleted or rewritten: the JSON files stay where they are, and every
 imported record is stored with its original content in `paper_sources`.
+
+stage 5 - Legacy screening imports distinguish records skipped due to missing abstracts
+from genuine processing failures, preserving the original evaluation outcome.
 """
 
 from __future__ import annotations
@@ -109,16 +112,35 @@ def import_evaluated_json(conn, project_id: int, path: str | Path, legacy_topic:
             continue
         relevant = record.get("is_relevant")
         ok = isinstance(relevant, bool)
+
+        legacy_status = str(record.get("status") or "").strip().lower()
+        reason = str(record.get("reason") or "").strip()
+
+        if ok:
+            status = "ok"
+            decision = "include" if relevant else "exclude"
+            error = None
+
+        elif legacy_status == "skipped_no_abstract":
+            status = "skipped"
+            decision = "uncertain"
+            error = None
+
+        else:
+            status = "failed"
+            decision = None
+            error = reason or "Legacy record without a valid is_relevant value"
+
         db.add_screening(
             conn, project_id=project_id, paper_id=paper_id,
-            status="ok" if ok else "failed",
-            decision=("include" if relevant else "exclude") if ok else None,
+            status=status,
+            decision=decision,
             reason=record.get("reason"),
             prompt_version=record.get("screening_prompt_version") or LEGACY_PROMPT_VERSION,
             criteria_hash="legacy",
             provider="groq", model=record.get("screening_model") or legacy_model,
             settings={"topic": record.get("screening_topic") or legacy_topic, "imported_from": str(path)},
-            error=None if ok else "legacy record without a valid is_relevant value",
+            error=error,
         )
         imported += 1
     db.log_event(conn, project_id, "info", "legacy_import",

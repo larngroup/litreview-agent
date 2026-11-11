@@ -1,3 +1,6 @@
+""" 
+check the import of old JSON files, the deduplication and the compatibility.
+"""
 import json
 
 from literature_agent.storage import database as db
