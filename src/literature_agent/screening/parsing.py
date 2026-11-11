@@ -44,3 +44,12 @@ def parse_model_output(text: str | None, schema: type[T]) -> T:
             f"{'.'.join(str(p) for p in err['loc']) or '(root)'}: {err['msg']}" for err in exc.errors()
         )
         raise ResponseParseError(f"JSON did not match the schema: {problems}", text) from exc
+
+
+def strict_json_schema(schema: type[BaseModel]) -> dict:
+    """JSON Schema for `schema` in the form strict structured-output APIs expect:
+    every property required and no additional properties."""
+    result = schema.model_json_schema()
+    result["required"] = list(result.get("properties", {}))
+    result["additionalProperties"] = False
+    return result

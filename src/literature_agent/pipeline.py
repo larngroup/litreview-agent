@@ -6,20 +6,11 @@ research logic lives in exactly one place.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections import Counter
 from collections.abc import Callable
 
-from .screening.relevance import PROMPT_VERSION, screen_paper
+from .screening.relevance import PROMPT_VERSION, Criteria, ScreeningResult, screen_paper
 from .storage import database as db
-
-
-def topic_criteria_hash(topic: str, prompt_version: str = PROMPT_VERSION) -> str:
-    """Identifies 'which question was asked'. Different topic => different hash => re-screen."""
-    payload = json.dumps({"topic": topic.strip(), "prompt_version": prompt_version}, sort_keys=True)
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
-
 
 
 def run_search(conn, project_id: int, query: str, limit: int, source) -> dict:
@@ -124,38 +115,44 @@ def run_multi_search(conn, project_id: int, query: str, limit: int, sources) -> 
     return summaries
 
 
-def run_screening(conn, project_id: int, provider, topic: str | None = None,
-                  retry_failed: bool = False,
-                  on_progress: Callable[[int, int, dict], None] | None = None) -> Counter:
-    """Screen every paper that has no result yet for this topic and prompt version."""
+def run_screening(conn, project_id: int, provider, *, retry_failed: bool = False,
+                  redo_all: bool = False, max_papers: int | None = None,
+                  on_progress: Callable[[int, int, ScreeningResult], None] | None = None) -> Counter:
+    """Screen the project's papers against its CURRENT criteria.
+
+    Papers already screened with the same criteria and prompt version are skipped,
+    so an interrupted run can simply be started again.
+    """
     project = db.require_project(conn, project_id)
-    topic = (topic or project["topic"]).strip()
-    criteria_hash = topic_criteria_hash(topic)
+    criteria = Criteria.from_project(project)
+    criteria_hash = criteria.fingerprint()
     latest = db.latest_screenings(conn, project_id, criteria_hash)
     todo = [p for p in db.project_papers(conn, project_id)
-            if p["id"] not in latest or (retry_failed and latest[p["id"]]["status"] == "failed")]
+            if redo_all or p["id"] not in latest
+            or (retry_failed and latest[p["id"]]["status"] == "failed")]
+    if max_papers is not None:
+        todo = todo[:max_papers]
+    run_settings = {"temperature": getattr(provider, "temperature", None),
+                    "structured_mode": getattr(provider, "structured_mode", "json_object"),
+                    "external": provider.is_external, "criteria": criteria.model_dump()}
     db.log_event(conn, project_id, "info", "screening_started", f"Screening {len(todo)} papers",
-                 {"provider": provider.name, "model": provider.model, "external": provider.is_external,
-                  "topic": topic, "prompt_version": PROMPT_VERSION})
+                 {"provider": provider.name, "model": provider.model, "prompt_version": PROMPT_VERSION,
+                  "criteria_hash": criteria_hash, **run_settings})
     counts: Counter = Counter()
     for index, row in enumerate(todo, start=1):
-        outcome = screen_paper(db.paper_from_row(row), topic, provider)
-        status = {"ok": "ok", "failed": "failed", "skipped_no_abstract": "skipped"}[outcome["screening_status"]]
-        relevant = outcome["is_relevant"]
-        decision = None if relevant is None else ("include" if relevant else "exclude")
-        if status == "skipped":
-            decision = "uncertain"
+        result = screen_paper(db.paper_from_row(row), criteria, provider)
         db.add_screening(
-            conn, project_id=project_id, paper_id=row["id"], status=status, decision=decision,
-            reason=outcome["reason"], prompt_version=PROMPT_VERSION, criteria_hash=criteria_hash,
-            provider=provider.name, model=provider.model, settings={"topic": topic},
-            raw_response=outcome["raw_response"], error=outcome["screening_error"],
+            conn, project_id=project_id, paper_id=row["id"], status=result.status,
+            decision=result.decision, reason=result.reason, details=result.details,
+            provider=result.provider, model=result.model, prompt_version=PROMPT_VERSION,
+            criteria_hash=criteria_hash, settings=run_settings,
+            raw_response=result.raw_response, error=result.error,
         )
-        if status == "failed":
-            db.log_event(conn, project_id, "warning", "screening_failed",
-                         outcome["screening_error"] or "unknown error", {"paper_id": row["id"]})
-        counts[status] += 1
+        if result.status == "failed":
+            db.log_event(conn, project_id, "warning", "screening_failed", result.error or "unknown error",
+                         {"paper_id": row["id"]})
+        counts[result.status] += 1
         if on_progress:
-            on_progress(index, len(todo), outcome)
+            on_progress(index, len(todo), result)
     db.log_event(conn, project_id, "info", "screening_completed", "Screening finished", dict(counts))
     return counts

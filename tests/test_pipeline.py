@@ -21,24 +21,46 @@ def test_failed_search_is_recorded(conn, project_id):
     assert run["status"] == "failed" and "network down" in run["error"]
 
 
-def test_screening_uses_project_topic_and_is_resumable(conn, project_id, make_paper):
+def reply(decision):
+    return ('{"decision": "%s", "reason": "r", "matched_inclusion": [], "matched_exclusion": []}' % decision)
+
+
+def test_screening_is_resumable_and_retries_failures(conn, project_id, make_paper):
+    db.update_project(conn, project_id, topic="human-in-the-loop machine learning",
+                      research_question="Q?", inclusion_criteria=["empirical"], exclusion_criteria=[])
     db.add_paper(conn, project_id, None, make_paper())
     db.add_paper(conn, project_id, None, make_paper(source_id="W2", doi="10.1/b", abstract=""))
-    provider = FakeProvider(["garbage"])
+    provider = FakeProvider(["garbage", "garbage again"])
     counts = pipeline.run_screening(conn, project_id, provider)
     assert counts == {"failed": 1, "skipped": 1}
-    assert "human-in-the-loop machine learning" in provider.calls[0]["user"]
+    assert "- empirical" in provider.calls[0]["user"]
 
-    assert pipeline.run_screening(conn, project_id, FakeProvider([])) == {}      # nothing new to do
-    retry = FakeProvider(['{"is_relevant": true, "reason": "fits"}'])
+    assert pipeline.run_screening(conn, project_id, FakeProvider([])) == {}      # nothing left to do
+    retry = FakeProvider([reply("include")])
     assert pipeline.run_screening(conn, project_id, retry, retry_failed=True) == {"ok": 1}
     decisions = {p["screening"]["decision"] for p in db.project_papers(conn, project_id)}
     assert decisions == {"include", "uncertain"}
+    events = [e["event"] for e in db.list_events(conn, project_id)]
+    assert "screening_failed" in events and "screening_started" in events
 
 
-def test_changing_topic_triggers_new_screening(conn, project_id, make_paper):
+def test_changed_criteria_trigger_new_screening(conn, project_id, make_paper):
     db.add_paper(conn, project_id, None, make_paper())
-    pipeline.run_screening(conn, project_id, FakeProvider(['{"is_relevant": true, "reason": "r"}']))
-    counts = pipeline.run_screening(conn, project_id, FakeProvider(['{"is_relevant": false, "reason": "r"}']),
-                                    topic="a different topic")
-    assert counts == {"ok": 1}
+    pipeline.run_screening(conn, project_id, FakeProvider([reply("include")]))
+    db.update_project(conn, project_id, topic="a different topic", research_question="",
+                      inclusion_criteria=[], exclusion_criteria=[])
+    assert pipeline.run_screening(conn, project_id, FakeProvider([reply("exclude")])) == {"ok": 1}
+
+
+def test_settings_and_versions_are_recorded(conn, project_id, make_paper):
+    pid = db.add_paper(conn, project_id, None, make_paper()).paper_id
+    pipeline.run_screening(conn, project_id, FakeProvider([reply("include")]))
+    screening = db.latest_screenings(conn, project_id)[pid]
+    assert screening["model"] == "fake-model" and screening["prompt_version"] == "screening-v2"
+    assert screening["settings"]["criteria"]["topic"] == "human-in-the-loop machine learning"
+
+
+def test_max_papers(conn, project_id, make_paper):
+    db.add_paper(conn, project_id, None, make_paper())
+    db.add_paper(conn, project_id, None, make_paper(source_id="W2", doi="10.1/b"))
+    assert pipeline.run_screening(conn, project_id, FakeProvider([reply("include")]), max_papers=1) == {"ok": 1}

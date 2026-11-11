@@ -1,15 +1,19 @@
 """Command-line interface.
 
-Database workflow (new in Stage 3):
-    litagent project create NAME --topic "..."
-    litagent search "query" --project NAME --limit 100 [--source openalex --source crossref]
-    litagent screen --project NAME [--retry-failed]
+    litagent project create NAME --topic "..." [--question "..."]
+    litagent project criteria NAME --include "..." --exclude "..." [--question "..."]
+    litagent project list
+    litagent search "query" --project NAME [--source openalex --source crossref] [--limit 100]
+    litagent screen --project NAME [--retry-failed] [--redo] [--max N]
+    litagent review --project NAME --paper ID --decision include|exclude|uncertain [--note "..."]
+    litagent papers --project NAME [--decision uncertain] [--unreviewed]
+    litagent failures --project NAME
+    litagent evaluate --project NAME
     litagent status --project NAME
-    litagent import-json --project NAME papers.json [--evaluated evaluated.json]
+    litagent import-json --project NAME papers.json [--evaluated evaluated.json --legacy-topic "..."]
 
-JSON workflow from Stage 2 (still works, no --project):
-    litagent search "query" --out data/papers_dataset.json
-    litagent screen data/papers_dataset.json --out data/evaluated_dataset.json
+`search` without --project still writes a JSON file (Stage 2 behaviour).
+Screening of JSON files was removed in Stage 5: import them with `import-json`.
 """
 
 from __future__ import annotations
@@ -24,20 +28,19 @@ from pathlib import Path
 from . import pipeline
 from .config import load_settings
 from .discovery import SOURCE_NAMES, make_source
-from .models import Paper, utc_now
+from .models import utc_now
 from .providers.groq import GroqProvider, LLMError
-from .screening.relevance import screen_papers
+from .screening.evaluation import agreement_report
+from .screening.relevance import Criteria
 from .storage import database as db
 from .storage.legacy_import import import_evaluated_json, import_papers_json
+
+DECISIONS = ("include", "exclude", "uncertain")
 
 
 def _write_json(data, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-def _read_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _open_db(settings):
@@ -51,12 +54,36 @@ def _make_provider(settings):
     return provider
 
 
+def _project(conn, name):
+    return db.require_project(conn, name)
+
+
 # --------------------------------------------------------------------------- project
 
 def cmd_project_create(args, settings) -> int:
     conn = _open_db(settings)
-    project_id = db.create_project(conn, args.name, args.topic, args.question or "")
+    project_id = db.create_project(conn, args.name, args.topic, args.question or "",
+                                   args.include or [], args.exclude or [])
     print(f"Created project {args.name!r} (id {project_id}) in {settings.db_path}")
+    return 0
+
+
+def cmd_project_criteria(args, settings) -> int:
+    conn = _open_db(settings)
+    project = _project(conn, args.name)
+    db.update_project(
+        conn, project["id"],
+        topic=args.topic or project["topic"],
+        research_question=args.question if args.question is not None else project["research_question"],
+        inclusion_criteria=args.include if args.include is not None else project["inclusion_criteria"],
+        exclusion_criteria=args.exclude if args.exclude is not None else project["exclusion_criteria"],
+    )
+    updated = _project(conn, args.name)
+    db.log_event(conn, project["id"], "info", "criteria_updated", "Screening criteria changed",
+                 {k: updated[k] for k in ("topic", "research_question", "inclusion_criteria",
+                                          "exclusion_criteria")})
+    print(json.dumps({k: updated[k] for k in ("topic", "research_question", "inclusion_criteria",
+                                              "exclusion_criteria")}, indent=2))
     return 0
 
 
@@ -80,12 +107,11 @@ def cmd_search(args, settings) -> int:
     sources = [make_source(name, settings) for name in source_names]
     if args.project:
         conn = _open_db(settings)
-        project = db.require_project(conn, args.project)
+        project = _project(conn, args.project)
         summaries = pipeline.run_multi_search(conn, project["id"], args.query, args.limit, sources)
         print(json.dumps(summaries, indent=2))
         return 1 if any("error" in s for s in summaries) else 0
 
-    # JSON mode (Stage 2 behaviour): records from all sources are written as-is, no deduplication.
     started = utc_now()
     papers = [paper for source in sources for paper in source.search(args.query, limit=args.limit)]
     out = Path(args.out)
@@ -101,48 +127,82 @@ def cmd_search(args, settings) -> int:
     return 0
 
 
-# --------------------------------------------------------------------------- screen
+# --------------------------------------------------------------------------- screening
 
 def cmd_screen(args, settings) -> int:
+    conn = _open_db(settings)
+    project = _project(conn, args.project)
+    if not project["inclusion_criteria"]:
+        print("WARNING: no inclusion criteria set; the model will judge against the topic only. "
+              "Use `litagent project criteria`.")
     try:
         provider = _make_provider(settings)
     except LLMError as exc:
         print(f"ERROR: {exc}")
         return 2
 
-    if args.project:
-        conn = _open_db(settings)
-        project = db.require_project(conn, args.project)
+    def progress(index: int, total: int, result) -> None:
+        print(f"[{index}/{total}] {result.status:<8} {result.decision or '-':<10} {(result.reason or result.error or '')[:70]}")
 
-        def progress(index: int, total: int, outcome: dict) -> None:
-            title = (outcome.get("title") or "(no title)")[:60]
-            print(f"[{index}/{total}] {outcome['screening_status']:<20} {title}")
+    counts = pipeline.run_screening(conn, project["id"], provider, retry_failed=args.retry_failed,
+                                    redo_all=args.redo, max_papers=args.max, on_progress=progress)
+    print("Summary:", dict(counts) or "nothing to screen")
+    if counts.get("failed"):
+        print("Some screenings failed. Inspect them with `litagent failures`, then run with --retry-failed.")
+    return 0
 
-        counts = pipeline.run_screening(conn, project["id"], provider, topic=args.topic,
-                                        retry_failed=args.retry_failed, on_progress=progress)
-        print("Summary:", dict(counts) or "nothing to screen")
-        return 0
 
-    if not args.input:
-        print("ERROR: give an input JSON file or --project.")
+def cmd_review(args, settings) -> int:
+    conn = _open_db(settings)
+    project = _project(conn, args.project)
+    member = conn.execute("SELECT 1 FROM project_papers WHERE project_id = ? AND paper_id = ?",
+                          (project["id"], args.paper)).fetchone()
+    if not member:
+        print(f"ERROR: paper {args.paper} is not part of project {project['name']!r}.")
         return 2
-    papers = [Paper.model_validate(r) for r in _read_json(Path(args.input))]
-    topic = args.topic
-    if not topic:
-        queries = {p.query for p in papers if p.query}
-        if len(queries) != 1:
-            print("ERROR: pass --topic (the file has zero or several different queries).")
-            return 2
-        topic = queries.pop()
-    print(f"Screening {len(papers)} papers for topic: {topic!r}")
+    db.add_review(conn, project["id"], args.paper, args.decision, args.note or "", args.reviewer or "")
+    print(f"Recorded human decision {args.decision!r} for paper {args.paper}.")
+    return 0
 
-    def progress_json(index: int, outcome: dict) -> None:
-        title = (outcome.get("title") or "(no title)")[:60]
-        print(f"[{index}/{len(papers)}] {outcome['screening_status']:<20} {title}")
 
-    results = screen_papers(papers, topic, provider, on_progress=progress_json)
-    _write_json(results, Path(args.out))
-    print("Summary:", dict(Counter(r["screening_status"] for r in results)))
+def cmd_papers(args, settings) -> int:
+    conn = _open_db(settings)
+    project = _project(conn, args.project)
+    criteria_hash = Criteria.from_project(project).fingerprint()
+    for paper in db.project_papers(conn, project["id"], criteria_hash):
+        suggestion = (paper["screening"] or {}).get("decision")
+        final = paper["final_decision"]
+        if args.decision and suggestion != args.decision:
+            continue
+        if args.unreviewed and final is not None:
+            continue
+        print(f"{paper['id']:>5}  model={suggestion or '-':<9} human={final or '-':<9} "
+              f"{paper['year'] or '----'}  {(paper['title'] or '(no title)')[:70]}")
+    return 0
+
+
+def cmd_failures(args, settings) -> int:
+    conn = _open_db(settings)
+    project = _project(conn, args.project)
+    criteria_hash = Criteria.from_project(project).fingerprint()
+    failed = [s for s in db.latest_screenings(conn, project["id"], criteria_hash).values()
+              if s["status"] == "failed"]
+    for item in failed:
+        print(f"paper {item['paper_id']}: {item['error']}")
+        if item["raw_response"]:
+            print(f"    raw: {item['raw_response'][:200]!r}")
+    print(f"{len(failed)} failed screening(s).")
+    return 0
+
+
+def cmd_evaluate(args, settings) -> int:
+    conn = _open_db(settings)
+    project = _project(conn, args.project)
+    criteria_hash = Criteria.from_project(project).fingerprint()
+    report = agreement_report(db.project_papers(conn, project["id"], criteria_hash))
+    print(json.dumps(report, indent=2))
+    if report["compared"] < 30:
+        print("NOTE: fewer than 30 human-reviewed papers; these numbers are not yet meaningful.")
     return 0
 
 
@@ -150,15 +210,17 @@ def cmd_screen(args, settings) -> int:
 
 def cmd_status(args, settings) -> int:
     conn = _open_db(settings)
-    project = db.require_project(conn, args.project)
-    papers = db.project_papers(conn, project["id"])
+    project = _project(conn, args.project)
+    criteria_hash = Criteria.from_project(project).fingerprint()
+    papers = db.project_papers(conn, project["id"], criteria_hash)
     statuses = Counter((p["screening"] or {}).get("status", "not screened") for p in papers)
-    decisions = Counter((p["screening"] or {}).get("decision") or "-" for p in papers)
+    suggestions = Counter((p["screening"] or {}).get("decision") or "-" for p in papers)
+    finals = Counter(p["final_decision"] or "not reviewed" for p in papers)
     print(f"Project {project['name']!r}  topic: {project['topic']}")
     print(f"Papers: {len(papers)}  (without abstract: {sum(not p['has_abstract'] for p in papers)})")
-    print("Latest screening status:", dict(statuses))
-    print("Model suggestions:      ", dict(decisions))
-    print("Human-reviewed:         ", sum(p["review"] is not None for p in papers))
+    print("Screening status (current criteria):", dict(statuses))
+    print("Model suggestions:                  ", dict(suggestions))
+    print("Human decisions:                    ", dict(finals))
     for run in db.list_search_runs(conn, project["id"]):
         print(f"  run {run['id']}: {run['source']:<12} {run['status']:<10} {run['started_at']} "
               f"retrieved={run['n_retrieved']} new={run['n_new']} query={run['query']!r}")
@@ -174,10 +236,9 @@ def cmd_import_json(args, settings) -> int:
             print("ERROR: project does not exist; pass --legacy-topic so it can be created.")
             return 2
         db.create_project(conn, args.project, topic)
-        project = db.require_project(conn, args.project)
+        project = _project(conn, args.project)
         print(f"Created project {args.project!r}")
-    summary = import_papers_json(conn, project["id"], args.papers, query=args.query or "")
-    print("Papers:", summary)
+    print("Papers:", import_papers_json(conn, project["id"], args.papers, query=args.query or ""))
     if args.evaluated:
         if not args.legacy_topic:
             print("ERROR: --legacy-topic is required with --evaluated (the v4 notebook used 'Human in the loop').")
@@ -193,13 +254,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true", help="show debug logging")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    project = sub.add_parser("project", help="create or list research projects")
+    project = sub.add_parser("project", help="create, configure or list research projects")
     project_sub = project.add_subparsers(dest="project_command", required=True)
     create = project_sub.add_parser("create")
     create.add_argument("name")
     create.add_argument("--topic", required=True)
     create.add_argument("--question", help="research question")
+    create.add_argument("--include", action="append", help="inclusion criterion (repeatable)")
+    create.add_argument("--exclude", action="append", help="exclusion criterion (repeatable)")
     create.set_defaults(func=cmd_project_create)
+    criteria = project_sub.add_parser("criteria", help="replace topic/question/criteria")
+    criteria.add_argument("name")
+    criteria.add_argument("--topic")
+    criteria.add_argument("--question")
+    criteria.add_argument("--include", action="append")
+    criteria.add_argument("--exclude", action="append")
+    criteria.set_defaults(func=cmd_project_criteria)
     project_sub.add_parser("list").set_defaults(func=cmd_project_list)
 
     search = sub.add_parser("search", help="search scholarly sources")
@@ -207,17 +277,38 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--source", action="append", choices=SOURCE_NAMES,
                         help="repeat to use several sources (default: openalex)")
     search.add_argument("--project", help="store results in this project (database)")
-    search.add_argument("--limit", type=int, default=100)
+    search.add_argument("--limit", type=int, default=100, help="maximum records per source")
     search.add_argument("--out", default="data/papers_dataset.json", help="JSON output (without --project)")
     search.set_defaults(func=cmd_search)
 
-    screen = sub.add_parser("screen", help="screen papers with the LLM")
-    screen.add_argument("input", nargs="?", help="JSON file (without --project)")
-    screen.add_argument("--project")
-    screen.add_argument("--topic", help="override the topic")
+    screen = sub.add_parser("screen", help="screen the project's papers with the LLM")
+    screen.add_argument("--project", required=True)
     screen.add_argument("--retry-failed", action="store_true", help="re-run failed screenings")
-    screen.add_argument("--out", default="data/evaluated_dataset.json")
+    screen.add_argument("--redo", action="store_true", help="re-screen every paper")
+    screen.add_argument("--max", type=int, help="screen at most N papers (useful for a trial run)")
     screen.set_defaults(func=cmd_screen)
+
+    review = sub.add_parser("review", help="record a human screening decision")
+    review.add_argument("--project", required=True)
+    review.add_argument("--paper", type=int, required=True, help="paper id (see `litagent papers`)")
+    review.add_argument("--decision", choices=DECISIONS, required=True)
+    review.add_argument("--note")
+    review.add_argument("--reviewer")
+    review.set_defaults(func=cmd_review)
+
+    papers = sub.add_parser("papers", help="list papers with model and human decisions")
+    papers.add_argument("--project", required=True)
+    papers.add_argument("--decision", choices=DECISIONS, help="filter on the model suggestion")
+    papers.add_argument("--unreviewed", action="store_true", help="only papers without a human decision")
+    papers.set_defaults(func=cmd_papers)
+
+    failures = sub.add_parser("failures", help="show failed screenings with their errors")
+    failures.add_argument("--project", required=True)
+    failures.set_defaults(func=cmd_failures)
+
+    evaluate = sub.add_parser("evaluate", help="compare model suggestions with human decisions")
+    evaluate.add_argument("--project", required=True)
+    evaluate.set_defaults(func=cmd_evaluate)
 
     status = sub.add_parser("status", help="show a project summary")
     status.add_argument("--project", required=True)
@@ -233,22 +324,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(levelname)s %(message)s",
-    )
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
+                        format="%(levelname)s %(message)s")
     
     # Silence httpx and httpcore debug logs, which are showing API keys in the logs.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-
+    
     try:
         return args.func(args, load_settings())
     except KeyboardInterrupt:
-        print("\nSearch or screening interrupted by user (Ctrl+C).")
+        print("\nSearch or screening interrupted by user (Ctrl+C).")    #added at stage 3
         return 130
     except ValueError as exc:
         print(f"ERROR: {exc}")

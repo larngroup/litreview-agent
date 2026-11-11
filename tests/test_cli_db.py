@@ -4,21 +4,51 @@ from literature_agent import cli
 from literature_agent.models import Paper
 from tests.conftest import FakeProvider, FakeSource
 
+REPLY = '{"decision": "include", "reason": "fits", "matched_inclusion": ["empirical"], "matched_exclusion": []}'
 
-def test_database_workflow(tmp_path, monkeypatch, capsys):
+
+def setup(tmp_path, monkeypatch, replies):
     monkeypatch.setenv("LITAGENT_DB_PATH", str(tmp_path / "lit.db"))
     paper = Paper(source="openalex", source_id="W1", title="Some long enough paper title", abstract="A")
     monkeypatch.setattr(cli, "make_source", lambda name, settings: FakeSource(name, [paper]))
-    fake = FakeProvider(['{"is_relevant": true, "reason": "fits"}'])
+    fake = FakeProvider(replies)
     monkeypatch.setattr(cli.GroqProvider, "from_settings", classmethod(lambda cls, s: fake))
+    return fake
 
-    assert cli.main(["project", "create", "demo", "--topic", "human in the loop"]) == 0
-    assert cli.main(["search", "hitl", "--project", "demo", "--limit", "5"]) == 0
+
+def test_full_database_workflow(tmp_path, monkeypatch, capsys):
+    setup(tmp_path, monkeypatch, [REPLY])
+    assert cli.main(["project", "create", "demo", "--topic", "human in the loop",
+                     "--include", "empirical", "--exclude", "editorial"]) == 0
+    assert cli.main(["search", "hitl", "--project", "demo", "--source", "openalex", "--source", "crossref"]) == 0
     assert cli.main(["screen", "--project", "demo"]) == 0
+    assert cli.main(["review", "--project", "demo", "--paper", "1", "--decision", "exclude", "--note", "x"]) == 0
     capsys.readouterr()
     assert cli.main(["status", "--project", "demo"]) == 0
     out = capsys.readouterr().out
-    assert "Papers: 1" in out and "'include': 1" in out
+    assert "Papers: 1" in out and "'include': 1" in out and "'exclude': 1" in out
+    assert cli.main(["papers", "--project", "demo"]) == 0
+    assert "model=include   human=exclude" in capsys.readouterr().out
+    assert cli.main(["evaluate", "--project", "demo"]) == 0
+    assert '"compared": 1' in capsys.readouterr().out
+
+
+def test_criteria_update_and_failures(tmp_path, monkeypatch, capsys):
+    setup(tmp_path, monkeypatch, ["bad", "bad"])
+    cli.main(["project", "create", "demo", "--topic", "t"])
+    cli.main(["project", "criteria", "demo", "--include", "a", "--include", "b"])
+    assert '"a"' in capsys.readouterr().out
+    cli.main(["search", "q", "--project", "demo"])
+    cli.main(["screen", "--project", "demo"])
+    capsys.readouterr()
+    cli.main(["failures", "--project", "demo"])
+    assert "1 failed screening(s)" in capsys.readouterr().out
+
+
+def test_review_rejects_unknown_paper(tmp_path, monkeypatch, capsys):
+    setup(tmp_path, monkeypatch, [])
+    cli.main(["project", "create", "demo", "--topic", "t"])
+    assert cli.main(["review", "--project", "demo", "--paper", "99", "--decision", "include"]) == 2
 
 
 def test_import_json_creates_project(tmp_path, monkeypatch):
