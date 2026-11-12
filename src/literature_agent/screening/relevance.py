@@ -136,7 +136,8 @@ def screen_paper(paper: Paper, criteria: Criteria, provider: TextGenerator,
                    "matched_inclusion": output.matched_inclusion,
                    "matched_exclusion": output.matched_exclusion,
                    "unrecognised_criteria": unknown,
-                   "attempts": len(attempts) + 1}
+                   "attempts": len(attempts) + 1,
+                   "output_mode": getattr(response, "mode", None)}
         return ScreeningResult(status="ok", decision=output.decision, reason=output.reason,
                                details=details, raw_response=response.text, **base)
     return ScreeningResult(status="failed", decision=None, reason=None,

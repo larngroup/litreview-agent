@@ -34,9 +34,14 @@ def _str(name: str, default: str | None = None) -> str | None:
 class Settings:
     openalex_api_key: str | None
     contact_email: str | None
+    llm_provider: str                 # "groq" or "ollama"
+    llm_structured_mode: str          # "auto", "json_schema", "json_object" or "none"
     groq_api_key: str | None
     groq_model: str
     groq_base_url: str
+    ollama_base_url: str
+    ollama_model: str
+    ollama_timeout_seconds: float
     llm_temperature: float
     llm_timeout_seconds: float
     llm_max_retries: int
@@ -54,9 +59,14 @@ def load_settings(env_file: str | os.PathLike | None = ".env") -> Settings:
     return Settings(
         openalex_api_key=_str("OPENALEX_API_KEY"),
         contact_email=_str("CONTACT_EMAIL"),
+        llm_provider=_str("LLM_PROVIDER", "groq").lower(),
+        llm_structured_mode=_str("LLM_STRUCTURED_MODE", "auto").lower(),
         groq_api_key=_str("GROQ_API_KEY"),
         groq_model=_str("GROQ_MODEL", "openai/gpt-oss-20b"),
         groq_base_url=_str("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+        ollama_base_url=_str("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+        ollama_model=_str("OLLAMA_MODEL", "llama3.1:8b"),
+        ollama_timeout_seconds=_float("OLLAMA_TIMEOUT_SECONDS", 300.0),
         llm_temperature=_float("LLM_TEMPERATURE", 0.0),
         llm_timeout_seconds=_float("LLM_TIMEOUT_SECONDS", 60.0),
         llm_max_retries=_int("LLM_MAX_RETRIES", 2),

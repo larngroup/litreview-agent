@@ -4,7 +4,7 @@
     litagent project criteria NAME --include "..." --exclude "..." [--question "..."]
     litagent project list
     litagent search "query" --project NAME [--source openalex --source crossref] [--limit 100]
-    litagent screen --project NAME [--retry-failed] [--redo] [--max N]
+    litagent screen --project NAME [--provider groq|ollama] [--model M] [--retry-failed] [--redo] [--max N]
     litagent review --project NAME --paper ID --decision include|exclude|uncertain [--note "..."]
     litagent papers --project NAME [--decision uncertain] [--unreviewed]
     litagent failures --project NAME
@@ -29,7 +29,8 @@ from . import pipeline
 from .config import load_settings
 from .discovery import SOURCE_NAMES, make_source
 from .models import utc_now
-from .providers.groq import GroqProvider, LLMError
+#from .providers.groq import GroqProvider, LLMError
+from .providers import PROVIDER_NAMES, LLMError, get_provider
 from .screening.evaluation import agreement_report
 from .screening.relevance import Criteria
 from .storage import database as db
@@ -47,10 +48,12 @@ def _open_db(settings):
     return db.connect(settings.db_path)
 
 
-def _make_provider(settings):
-    provider = GroqProvider.from_settings(settings)
+def _make_provider(settings, name=None, model=None):
+    provider = get_provider(settings, name=name, model=model)
     if provider.is_external:
         print(f"NOTE: titles and abstracts will be sent to an external provider ({provider.name}).")
+    else:
+        print(f"Using local model {provider.model!r} via {provider.name}; data stays on this computer.")
     return provider
 
 
@@ -136,7 +139,7 @@ def cmd_screen(args, settings) -> int:
         print("WARNING: no inclusion criteria set; the model will judge against the topic only. "
               "Use `litagent project criteria`.")
     try:
-        provider = _make_provider(settings)
+        provider = _make_provider(settings, name=args.provider, model=args.model)
     except LLMError as exc:
         print(f"ERROR: {exc}")
         return 2
@@ -307,6 +310,8 @@ def build_parser() -> argparse.ArgumentParser:
     screen.add_argument("--retry-failed", action="store_true", help="re-run failed screenings")
     screen.add_argument("--redo", action="store_true", help="re-screen every paper")
     screen.add_argument("--max", type=int, help="screen at most N papers (useful for a trial run)")
+    screen.add_argument("--provider", choices=PROVIDER_NAMES, help="override LLM_PROVIDER")
+    screen.add_argument("--model", help="override the model name")
     screen.set_defaults(func=cmd_screen)
 
     review = sub.add_parser("review", help="record a human screening decision")

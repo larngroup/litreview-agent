@@ -12,7 +12,7 @@ def setup(tmp_path, monkeypatch, replies):
     paper = Paper(source="openalex", source_id="W1", title="Some long enough paper title", abstract="A")
     monkeypatch.setattr(cli, "make_source", lambda name, settings: FakeSource(name, [paper]))
     fake = FakeProvider(replies)
-    monkeypatch.setattr(cli.GroqProvider, "from_settings", classmethod(lambda cls, s: fake))
+    monkeypatch.setattr(cli, "get_provider", lambda settings, name=None, model=None: fake)
     return fake
 
 
