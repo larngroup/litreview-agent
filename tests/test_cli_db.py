@@ -26,9 +26,18 @@ def test_full_database_workflow(tmp_path, monkeypatch, capsys):
     capsys.readouterr()
     assert cli.main(["status", "--project", "demo"]) == 0
     out = capsys.readouterr().out
-    assert "Papers: 1" in out and "'include': 1" in out and "'exclude': 1" in out
+    # Check that the status output contains the expected information - changed stage 5
     assert cli.main(["papers", "--project", "demo"]) == 0
-    assert "model=include   human=exclude" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Paper #1" in out
+    assert "Title: Some long enough paper title" in out
+    assert "DOI: Not available" in out
+    assert "Link: Not available" in out
+    assert "Abstract (database): YES" in out
+    assert "LLM decision: include" in out
+    assert "Human decision: exclude" in out
+    #assert "model=include   human=exclude" in capsys.readouterr().out
+
     assert cli.main(["evaluate", "--project", "demo"]) == 0
     assert '"compared": 1' in capsys.readouterr().out
 

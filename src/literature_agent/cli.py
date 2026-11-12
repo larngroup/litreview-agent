@@ -176,8 +176,29 @@ def cmd_papers(args, settings) -> int:
             continue
         if args.unreviewed and final is not None:
             continue
-        print(f"{paper['id']:>5}  model={suggestion or '-':<9} human={final or '-':<9} "
-              f"{paper['year'] or '----'}  {(paper['title'] or '(no title)')[:70]}")
+        
+        # Display abstract, DOI and article URL if available - changed at stage 5
+        
+        doi = paper.get("doi")
+        source_id = paper.get("source_id")
+        abstract = paper.get("abstract") or ""
+
+        doi_url = f"https://doi.org/{doi}" if doi else None
+        article_url = doi_url or source_id
+
+        has_abstract = bool(abstract.strip())
+
+        print(
+            f"\nPaper #{paper['id']}"
+            f"\nTitle: {paper.get('title') or '(no title)'}"
+            f"\nDOI: {doi or 'Not available'}"
+            f"\nLink: {article_url or 'Not available'}"
+            f"\nAbstract (database): {'YES' if has_abstract else 'NO'}"
+            f"\nLLM decision: {suggestion or 'pending'}"
+            f"\nHuman decision: {final or 'pending'}"
+        )
+
+
     return 0
 
 
@@ -330,8 +351,8 @@ def main(argv: list[str] | None = None) -> int:
                         format="%(levelname)s %(message)s")
     
     # Silence httpx and httpcore debug logs, which are showing API keys in the logs. - added at stage 4
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    #logging.getLogger("httpx").setLevel(logging.WARNING)
+    #logging.getLogger("httpcore").setLevel(logging.WARNING)
     
     try:
         return args.func(args, load_settings())

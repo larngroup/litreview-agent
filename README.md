@@ -50,12 +50,16 @@ litagent screen notebooks/papers_dataset.json
 # Screening results are saved incrementally; unfinished work can be continued.
 # Ctrl+C marks project searches as interrupted; repeat the search to try again.
 # Legacy screenings are preserved separately and may be re-screened.
+# Search failures (OpenAlex/Crossref) appear in `litagent status` as failed search runs.
+# `litagent failures` and `litagent screen --retry-failed` only concern LLM screening failures, not search failures.
+# A failed run is kept as execution history (e.g. Crossref run 17 was an intentional Stage 4 timeout test).
 # TODO Stage 5: 
 - Fix `legacy_import.py` to preserve `skipped_no_abstract` as `skipped` / `uncertain`, instead of incorrectly marking it as `failed`.
 - Add a regression test for imported screening statuses.
 - Keep legacy screenings separate using `criteria_hash="legacy"`.
 - Verify that `litagent status` reports screenings for the current criteria only, as planned in Stage 5.
 - Ensure imported historical results remain available after re-screening.
+
 ```
 
 ## Important limitations
