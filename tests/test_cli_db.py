@@ -71,3 +71,12 @@ def test_unknown_project_is_a_clear_error(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("LITAGENT_DB_PATH", str(tmp_path / "lit.db"))
     assert cli.main(["status", "--project", "nope"]) == 2
     assert "not found" in capsys.readouterr().out
+
+def test_export_bibtex(tmp_path, monkeypatch):
+    setup(tmp_path, monkeypatch, [REPLY])
+    cli.main(["project", "create", "demo", "--topic", "t"])
+    cli.main(["search", "q", "--project", "demo"])
+    cli.main(["review", "--project", "demo", "--paper", "1", "--decision", "include"])
+    out = tmp_path / "refs.bib"
+    assert cli.main(["export", "--project", "demo", "--format", "bibtex", "--out", str(out)]) == 0
+    assert "Some long enough paper title" in out.read_text()

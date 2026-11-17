@@ -9,6 +9,8 @@
     litagent papers --project NAME [--decision uncertain] [--unreviewed]
     litagent failures --project NAME
     litagent evaluate --project NAME
+    litagent export --project NAME --format bibtex|csv|json|searches [--subset
+all] --out FILE
     litagent status --project NAME
     litagent import-json --project NAME papers.json [--evaluated evaluated.json --legacy-topic "..."]
 
@@ -28,6 +30,7 @@ from pathlib import Path
 from . import pipeline
 from .config import load_settings
 from .discovery import SOURCE_NAMES, make_source
+from .exports import search_history_csv, select_papers, to_bibtex, to_csv, to_json
 from .models import utc_now
 #from .providers.groq import GroqProvider, LLMError
 from .providers import PROVIDER_NAMES, LLMError, get_provider
@@ -229,6 +232,20 @@ def cmd_evaluate(args, settings) -> int:
         print("NOTE: fewer than 30 human-reviewed papers; these numbers are not yet meaningful.")
     return 0
 
+def cmd_export(args, settings) -> int:
+    conn = _open_db(settings)
+    project = _project(conn, args.project)
+    criteria_hash = Criteria.from_project(project).fingerprint()
+    papers = select_papers(db.project_papers(conn, project["id"], criteria_hash), args.subset)
+    runs = db.list_search_runs(conn, project["id"])
+    content = {"bibtex": lambda: to_bibtex(papers), "csv": lambda: to_csv(papers),
+        "json": lambda: to_json(papers, project, runs),
+        "searches": lambda: search_history_csv(runs)}[args.format]()
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(content, encoding="utf-8")
+    print(f"Wrote {len(papers) if args.format != 'searches' else len(runs)} records to {out}")
+    return 0
 
 # --------------------------------------------------------------------------- status and import
 
@@ -335,6 +352,14 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate = sub.add_parser("evaluate", help="compare model suggestions with human decisions")
     evaluate.add_argument("--project", required=True)
     evaluate.set_defaults(func=cmd_evaluate)
+
+    export = sub.add_parser("export", help="export bibliography, decisions or search history")
+    export.add_argument("--project", required=True)
+    export.add_argument("--format", choices=["bibtex", "csv", "json", "searches"], default="bibtex")
+    export.add_argument("--subset", choices=["human_include", "model_include_unreviewed", "all"],
+    default="human_include")
+    export.add_argument("--out", required=True)
+    export.set_defaults(func=cmd_export)
 
     status = sub.add_parser("status", help="show a project summary")
     status.add_argument("--project", required=True)
