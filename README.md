@@ -62,6 +62,47 @@ litagent screen notebooks/papers_dataset.json
 
 ```
 
+## Web interface (Stage 7 — Streamlit)
+
+Install the web dependencies from the project root:
+
+```bash
+pip install -e ".[web,dev]"
+```
+
+Start the application:
+
+```bash
+python -m streamlit run app/streamlit_app.py --server.address localhost
+```
+
+Open http://localhost:8501 in your browser. Keep the terminal open while using the app; press `Ctrl+C` to stop it.
+
+## Stage 7 — Manual verification notes (2026-11-17)
+
+**Scope:** Functional validation of the Streamlit interface using project `ui_test`. These are observations from a small test, not a scientific evaluation of screening accuracy.
+
+### Confirmed results
+
+- The Streamlit interface started successfully; project creation, search, screening, review, BibTeX export, and Zotero import were exercised.
+- The Streamlit dashboard and `litagent status --project ui_test` agree: **21 papers**, **5 without abstracts**, **10 screened** with the current criteria (**9 `ok`, 1 `skipped`**), and **5 human-reviewed** (**3 `include`, 2 `exclude`**). Eleven papers remained unscreened.
+- Search history includes two initial searches (10 new records from OpenAlex and 10 from Crossref) and two repeated searches (0 new from OpenAlex, 1 new from Crossref). Duplicate records were recognised. The manual test used a limit of **10 per source**, rather than the **20** specified in the reference verification procedure.
+- The screening comparison reported `compared: 3`, `agreement: 1.0`, `include_recall: 1.0`, and `includes_wrongly_excluded: 0`. Only three reviewed records had a comparable model decision; the other two human reviews were not included in the agreement calculation (e.g. an unscreened or missing-abstract record). These figures are not a scientific accuracy estimate.
+- BibTeX export with the filter **"Included by a human reviewer"** yielded **3 entries** because only three of the five human-reviewed papers had an `include` decision. All three imported successfully into Zotero; their DOI links were manually opened and led to the expected documents.
+- The **Log** tab displays search and screening start/completion events. Criteria-update events should be checked in the full history if not visible in the latest rows.
+
+### Observed limitations and follow-up items
+
+1. **Export audit events:** No BibTeX/export event appeared in the displayed Log. Export works, but the action does not appear to be logged in the inspected history. Consider adding an `export_completed` event with format, filter and number of records if export traceability is needed. This is **not** a requirement of the Stage 7 verification procedure.
+2. **Generic BibTeX entry type:** Exported references use `@misc`, which Zotero imports as **Document**. This is valid BibTeX, but loses useful publication-type distinctions such as journal article (`@article`) and doctoral thesis (`@phdthesis`). Only choose a more specific type when supported by source metadata; do not infer it from the title.
+3. **Missing metadata — paper #129:** The doctoral thesis *Protein-ligand binding affinity prediction using combined molecular dynamics simulations and deep learning algorithms* was stored with an unknown year, so the BibTeX and Zotero records have no date. The source page states **"Soutenance le 11/12/2023"**, indicating a 2023 defence date; this was not captured in the database. Missing fields are preferable to fabricated values. A later metadata-enrichment step could record the defence year with provenance.
+4. **Metadata consistency — paper #119:** The point-cloud paper was exported with year **2021**; a 2022 journal issue/publication date has also been noted. Distinguish online-first from issue publication dates before changing the stored year. The author names were inspected in Zotero and **no confirmed author error** was found; an earlier potential name discrepancy is **unverified**, not an established defect.
+5. **Source coverage / missing abstracts:** Five of the 21 records lack abstracts in SQLite, even though an abstract for at least one paper (#123) was located manually on the publisher's website. Such records are marked `skipped`/`uncertain` during automated screening, not sent to the LLM, and can be reviewed manually. This is a source-metadata coverage limitation, not evidence of a model error.
+6. **Incomplete Stage 7 manual protocol:** The reference verification procedure asked for **limit 20** per discovery source and a deliberate change to at least one actual model suggestion. The recorded trial used limit 10; any intentional override of an LLM-generated `include`/`exclude` decision should be documented separately if performed. Manual resolution of a `skipped`/`uncertain` paper is not a direct disagreement with an LLM prediction.
+7. **README maintenance:** Parts of the older quick-start examples and the Stage 5 TODO remain historical and may not match the current Stage 7 CLI. They should be reviewed separately rather than copied as current usage instructions.
+
+**Conclusion:** The tested Stage 7 workflow is operational and the CLI/UI counters agree. The BibTeX entries imported successfully, and no invented fields were demonstrated in the inspected sample; missing and generic metadata remain follow-up items. Preserve these observations while proceeding to Stage 8.
+
 ## Important limitations
 
 - Screening uses titles and abstracts only. It is a preliminary filter, not a full-text eligibility decision.
