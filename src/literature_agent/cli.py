@@ -263,7 +263,7 @@ def cmd_fulltext_status(args, settings) -> int:
     for asset in project_assets(conn, project["id"]):
         print(f"{asset['paper_id']:>5} access={asset['access_status']:<13} download={asset['download_status']:<14} "
               f"parse={asset['parse_status']:<14} licence={asset['license'] or '?':<10} "
-              f"{(asset['error'] or asset['pdf_url'] or '')[:60]}")
+              f"{(asset['error'] or asset['pdf_url'] or '')[:200]}")
     return 0
 
 def cmd_export(args, settings) -> int:

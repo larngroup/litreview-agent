@@ -119,6 +119,19 @@ INFO HTTP Request: GET https://api.unpaywall.org/v2/10.70675/afb433b4z5353z43edz
 [3/3] download_failed
 Summary: {'parsed': 1, 'download_failed': 2}
 ```
+## testes
+- #121 — K DEEP: registo Zenodo removido; acesso ao PDF pela ACS sujeito a pagamento ou autenticação institucional.
+- #122 — Bioinformatics: PDF acessível manualmente, mas download automático bloqueado com HTTP 403.
+- #125 — CSBJ: URL antigo desatualizado; encontraste uma alternativa funcional para descarregar o PDF.
+- #127, #128 e #129: URLs completos identificados, ainda por verificar manualmente.
+
+Truncamento do terminal: confirmado que [:60] cortava apenas a apresentação. Registada a tua alteração para [:200].
+### TODOs futuros: 
+- melhorar a descoberta de PDFs
+- identificar ligações desatualizadas
+- distinguir causas de falha
+- ocultar a API key nos logs (acima).
+
 ## Important limitations
 
 - Screening uses titles and abstracts only. It is a preliminary filter, not a full-text eligibility decision.
