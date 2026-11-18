@@ -9,6 +9,8 @@
     litagent papers --project NAME [--decision uncertain] [--unreviewed]
     litagent failures --project NAME
     litagent evaluate --project NAME
+    litagent fulltext --project NAME [--subset human_include|include_any|all] [--retry-failed]
+    litagent fulltext-status --project NAME
     litagent export --project NAME --format bibtex|csv|json|searches [--subset
 all] --out FILE
     litagent status --project NAME
@@ -232,6 +234,38 @@ def cmd_evaluate(args, settings) -> int:
         print("NOTE: fewer than 30 human-reviewed papers; these numbers are not yet meaningful.")
     return 0
 
+def cmd_fulltext(args, settings) -> int:
+    from .discovery.http import PoliteClient
+
+    conn = _open_db(settings)
+    project = _project(conn, args.project)
+    if not settings.contact_email:
+        print("NOTE: CONTACT_EMAIL not set; Unpaywall lookups are skipped (OpenAlex only).")
+    http = PoliteClient(timeout=settings.http_timeout_seconds, max_retries=settings.http_max_retries,
+                        min_interval_seconds=0.2, contact_email=settings.contact_email)
+
+    def progress(index: int, total: int, state: str) -> None:
+        print(f"[{index}/{total}] {state}")
+
+    counts = pipeline.run_fulltext(conn, project["id"], http=http, data_dir=settings.data_dir,
+                                   openalex_api_key=settings.openalex_api_key,
+                                   contact_email=settings.contact_email, subset=args.subset,
+                                   retry_failed=args.retry_failed, on_progress=progress)
+    print("Summary:", dict(counts) or "no papers in this subset")
+    return 0
+
+
+def cmd_fulltext_status(args, settings) -> int:
+    from .fulltext.store import project_assets
+
+    conn = _open_db(settings)
+    project = _project(conn, args.project)
+    for asset in project_assets(conn, project["id"]):
+        print(f"{asset['paper_id']:>5} access={asset['access_status']:<13} download={asset['download_status']:<14} "
+              f"parse={asset['parse_status']:<14} licence={asset['license'] or '?':<10} "
+              f"{(asset['error'] or asset['pdf_url'] or '')[:60]}")
+    return 0
+
 def cmd_export(args, settings) -> int:
     conn = _open_db(settings)
     project = _project(conn, args.project)
@@ -360,6 +394,15 @@ def build_parser() -> argparse.ArgumentParser:
     default="human_include")
     export.add_argument("--out", required=True)
     export.set_defaults(func=cmd_export)
+
+    fulltext = sub.add_parser("fulltext", help="locate, download and parse open-access full texts")
+    fulltext.add_argument("--project", required=True)
+    fulltext.add_argument("--subset", choices=pipeline.FULLTEXT_SUBSETS, default="human_include")
+    fulltext.add_argument("--retry-failed", action="store_true")
+    fulltext.set_defaults(func=cmd_fulltext)
+    fulltext_status = sub.add_parser("fulltext-status", help="show full-text access per paper")
+    fulltext_status.add_argument("--project", required=True)
+    fulltext_status.set_defaults(func=cmd_fulltext_status)
 
     status = sub.add_parser("status", help="show a project summary")
     status.add_argument("--project", required=True)

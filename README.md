@@ -103,6 +103,22 @@ Open http://localhost:8501 in your browser. Keep the terminal open while using t
 
 **Conclusion:** The tested Stage 7 workflow is operational and the CLI/UI counters agree. The BibTeX entries imported successfully, and no invented fields were demonstrated in the inspected sample; missing and generic metadata remain follow-up items. Preserve these observations while proceeding to Stage 8.
 
+## Stage 8 - 
+### TODO importante
+- No output aparece a tua API key do OpenAlex dentro do URL, em texto legível (É o XXX):
+```bash
+litagent fulltext --project ui_test
+INFO HTTP Request: GET https://api.openalex.org/works/doi:10.1093/bib/bbab474?select=id%2Copen_access%2Cbest_oa_location&api_key=XXXXXX "HTTP/1.1 200 OK"
+INFO HTTP Request: GET https://arxiv.org/pdf/2107.04340 "HTTP/1.1 200 OK"
+[1/3] parsed
+INFO HTTP Request: GET https://api.openalex.org/works/doi:10.1021/acs.jcim.7b00650?select=id%2Copen_access%2Cbest_oa_location&api_key=XXXXX "HTTP/1.1 200 OK"
+INFO HTTP Request: GET https://api.unpaywall.org/v2/10.1021/acs.jcim.7b00650?email=petro.anonimo123%40gmail.com "HTTP/1.1 200 OK"
+[2/3] download_failed
+INFO HTTP Request: GET https://api.openalex.org/works/doi:10.70675/afb433b4z5353z43edzae3fzb8133e571989?select=id%2Copen_access%2Cbest_oa_location&api_key=XXXXX "HTTP/1.1 200 OK"
+INFO HTTP Request: GET https://api.unpaywall.org/v2/10.70675/afb433b4z5353z43edzae3fzb8133e571989?email=petro.anonimo123%40gmail.com "HTTP/1.1 200 OK"
+[3/3] download_failed
+Summary: {'parsed': 1, 'download_failed': 2}
+```
 ## Important limitations
 
 - Screening uses titles and abstracts only. It is a preliminary filter, not a full-text eligibility decision.

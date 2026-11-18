@@ -88,8 +88,8 @@ col2.metric("Without abstract", sum(not p["has_abstract"] for p in papers))
 col3.metric("Screened (current criteria)", sum(p["screening"] is not None for p in papers))
 col4.metric("Human-reviewed", sum(p["review"] is not None for p in papers))
 
-tab_criteria, tab_search, tab_screen, tab_review, tab_export, tab_log = st.tabs(
-    ["Criteria", "Search", "Screening", "Review", "Export", "Log"])
+tab_criteria, tab_search, tab_screen, tab_review, tab_fulltext, tab_export, tab_log = st.tabs(
+    ["Criteria", "Search", "Screening", "Review", "Full text", "Export", "Log"])
 
 # --------------------------------------------------------------------------- criteria
 with tab_criteria:
@@ -215,6 +215,31 @@ with tab_review:
                 db.add_review(conn, project_id, paper["id"], decision, note, reviewer)
                 st.success("Saved.")
                 st.rerun()
+
+# --------------------------------------------------------------------------- full text
+with tab_fulltext:
+    from literature_agent.discovery.http import PoliteClient
+    from literature_agent.fulltext.store import project_assets
+
+    st.write("Only open-access copies reported by OpenAlex or Unpaywall are downloaded. "
+             "Papers without an accessible copy stay in the project with their abstract and DOI.")
+    ft_subset = st.selectbox("Papers", pipeline.FULLTEXT_SUBSETS,
+                             format_func={"human_include": "Included by a human",
+                                          "include_any": "Included by a human or suggested by the model",
+                                          "all": "All papers"}.get)
+    ft_retry = st.checkbox("Retry failed look-ups, downloads and parsing")
+    if st.button("Retrieve full texts"):
+        http = PoliteClient(timeout=settings.http_timeout_seconds, max_retries=settings.http_max_retries,
+                            min_interval_seconds=0.2, contact_email=settings.contact_email)
+        ft_bar = st.progress(0.0, text="Starting...")
+        ft_counts = pipeline.run_fulltext(
+            conn, project_id, http=http, data_dir=settings.data_dir, openalex_api_key=settings.openalex_api_key,
+            contact_email=settings.contact_email, subset=ft_subset, retry_failed=ft_retry,
+            on_progress=lambda i, n, state: ft_bar.progress(i / n, text=f"{i}/{n}: {state}"))
+        st.success(f"Finished: {dict(ft_counts) or 'no papers in this subset'}")
+    st.dataframe([{k: a[k] for k in ("paper_id", "title", "access_status", "download_status", "parse_status",
+                                     "license", "oa_version", "n_pages", "pdf_url", "landing_url", "error")}
+                  for a in project_assets(conn, project_id)], hide_index=True)
 
 # --------------------------------------------------------------------------- export
 with tab_export:

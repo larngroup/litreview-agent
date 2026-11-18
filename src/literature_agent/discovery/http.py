@@ -18,6 +18,9 @@ RETRY_STATUS = {429, 500, 502, 503, 504}
 class SourceError(RuntimeError):
     """A scholarly API could not be queried. The message is safe to show to users."""
 
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 class PoliteClient:
     """GET JSON with a timeout, bounded retries, Retry-After support and a minimum
@@ -72,7 +75,8 @@ class PoliteClient:
                     except ValueError as exc:
                         raise SourceError(f"{url} returned invalid JSON") from exc
                 if response.status_code not in RETRY_STATUS:
-                    raise SourceError(f"{url} returned HTTP {response.status_code}: {response.text[:300]}")
+                    raise SourceError(f"{url} returned HTTP {response.status_code}: {response.text[:300]}",
+                                      status_code=response.status_code)
                 problem = f"HTTP {response.status_code}"
             if attempt == self.max_retries:
                 raise SourceError(f"{url} failed after {attempt + 1} attempts ({problem}); params={safe_params}")

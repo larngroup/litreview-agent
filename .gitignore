@@ -9,6 +9,9 @@ data/*
 # Data produced by notebooks (may contain licensed abstracts and full texts)
 notebooks/*.json
 
+# Database backup
+backups/
+
 # Python
 __pycache__/
 *.py[cod]

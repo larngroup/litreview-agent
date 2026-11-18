@@ -11,7 +11,9 @@ Design rules
 * Model screening results (`screenings`) and human decisions (`reviews`) are
   separate tables, so the model's suggestion can never silently become the
   final decision.
-* Full-text files are NOT stored here; Stage 8 adds a separate table for them.
+* Full-text files live on disk under data/fulltext/; the database stores only
+their location, licence and processing status (`fulltext_assets`) and extracted
+page text.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from typing import Any
 
 from ..models import Paper, title_key, utc_now
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_info (
@@ -120,6 +122,34 @@ CREATE TABLE IF NOT EXISTS reviews (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS fulltext_assets (
+    id INTEGER PRIMARY KEY,
+    paper_id INTEGER NOT NULL UNIQUE REFERENCES papers(id) ON DELETE CASCADE,
+    access_status TEXT NOT NULL CHECK (access_status IN ('open_access', 'not_found', 'no_identifier', 'lookup_failed')),
+    locator TEXT,
+    pdf_url TEXT,
+    landing_url TEXT,
+    license TEXT,
+    oa_version TEXT,
+    download_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (download_status IN ('pending', 'downloaded', 'failed', 'not_applicable')),
+    file_path TEXT,
+    sha256 TEXT,
+    size_bytes INTEGER,
+    parse_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (parse_status IN ('pending', 'parsed', 'failed', 'not_applicable')),
+    n_pages INTEGER,
+    error TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fulltext_pages (
+    asset_id INTEGER NOT NULL REFERENCES fulltext_assets(id) ON DELETE CASCADE,
+    page_number INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    PRIMARY KEY (asset_id, page_number)
+);
+
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY,
     project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
@@ -157,6 +187,10 @@ def connect(path: str | Path) -> sqlite3.Connection:
                 f"Database schema version {row['version']} is newer than this code "
                 f"supports ({SCHEMA_VERSION}). Update the application."
             )
+        elif row["version"] < SCHEMA_VERSION:
+            # Migrations so far only ADD tables (created above by CREATE TABLE IF NOT
+            # EXISTS), so existing data is untouched; we only record the new version.
+            conn.execute("UPDATE schema_info SET version = ?", (SCHEMA_VERSION,))
     return conn
 
 
