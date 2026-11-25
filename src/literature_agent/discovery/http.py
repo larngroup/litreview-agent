@@ -58,7 +58,11 @@ class PoliteClient:
         return min(self.backoff_seconds * (2 ** attempt), 60.0)
 
     def get_json(self, url: str, params: dict) -> dict:
-        safe_params = {k: v for k, v in params.items() if k not in {"api_key", "mailto"}}
+        # Exclude sensitive parameters from error messages. -> Stage 8 extra correction
+        safe_params = {
+            k: v for k, v in params.items()
+            if k.lower() not in {"api_key", "mailto", "email"}
+        }
         for attempt in range(self.max_retries + 1):
             self._wait_turn()
             response = None

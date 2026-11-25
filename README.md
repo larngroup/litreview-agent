@@ -105,17 +105,17 @@ Open http://localhost:8501 in your browser. Keep the terminal open while using t
 
 ## Stage 8 - 
 ### TODO importante
-- No output aparece a tua API key do OpenAlex dentro do URL, em texto legível (É o XXX):
+- No output aparece a API key do OpenAlex dentro do URL, em texto legível (É o XXX):
 ```bash
 litagent fulltext --project ui_test
 INFO HTTP Request: GET https://api.openalex.org/works/doi:10.1093/bib/bbab474?select=id%2Copen_access%2Cbest_oa_location&api_key=XXXXXX "HTTP/1.1 200 OK"
 INFO HTTP Request: GET https://arxiv.org/pdf/2107.04340 "HTTP/1.1 200 OK"
 [1/3] parsed
 INFO HTTP Request: GET https://api.openalex.org/works/doi:10.1021/acs.jcim.7b00650?select=id%2Copen_access%2Cbest_oa_location&api_key=XXXXX "HTTP/1.1 200 OK"
-INFO HTTP Request: GET https://api.unpaywall.org/v2/10.1021/acs.jcim.7b00650?email=petro.anonimo123%40gmail.com "HTTP/1.1 200 OK"
+INFO HTTP Request: GET https://api.unpaywall.org/v2/10.1021/acs.jcim.7b00650?email=???%40gmail.com "HTTP/1.1 200 OK"
 [2/3] download_failed
 INFO HTTP Request: GET https://api.openalex.org/works/doi:10.70675/afb433b4z5353z43edzae3fzb8133e571989?select=id%2Copen_access%2Cbest_oa_location&api_key=XXXXX "HTTP/1.1 200 OK"
-INFO HTTP Request: GET https://api.unpaywall.org/v2/10.70675/afb433b4z5353z43edzae3fzb8133e571989?email=petro.anonimo123%40gmail.com "HTTP/1.1 200 OK"
+INFO HTTP Request: GET https://api.unpaywall.org/v2/10.70675/afb433b4z5353z43edzae3fzb8133e571989?email=????%40gmail.com "HTTP/1.1 200 OK"
 [3/3] download_failed
 Summary: {'parsed': 1, 'download_failed': 2}
 ```
@@ -131,6 +131,76 @@ Truncamento do terminal: confirmado que [:60] cortava apenas a apresentação. R
 - identificar ligações desatualizadas
 - distinguir causas de falha
 - ocultar a API key nos logs (acima).
+- por pdfs recebidos obtidos no pc para a base dedados (import)
+
+
+### Stage 8 — Additional verification notes and deferred improvements
+
+**Scope:** Full-text retrieval and extraction were tested on the existing `ui_test` project. The original Stage 8 implementation remains the baseline; larger changes will be addressed after completing the reference implementation through Stage 10.
+
+#### Observed problems and limitations
+
+- Retrieval across all 21 records produced 4 `parsed` (IDs 119, 126, 130, 131), 5 `not_found` (120, 123, 134, 135, 136), and 12 `download_failed` results. Of the failures, 5 had no direct PDF URL (121, 127, 128, 129, 137) and 7 returned HTTP 403 (122, 124, 125, 132, 133, 138, 139). `not_found` means that no usable open-access location was returned by the consulted services, not that no legal copy exists.
+- Open-access metadata can be stale: #121 points to a Zenodo record removed by its owner on 6 December 2019; the publisher copy inspected manually requires payment or institutional access. #125 has an outdated PDF URL that redirects to a non-working endpoint, although an alternative PDF URL worked in the browser.
+- A valid PDF URL may reject automated requests: #122 was accessible in the browser after a human-verification step, but the downloader received HTTP 403. Other HTTP 403 responses have not been individually diagnosed; the status alone does not prove a paywall, anti-bot protection or rate limiting.
+- Some locations provide only a landing page. The current locator prefers `best_oa_location` and returns immediately if OpenAlex supplies a PDF URL; it does not automatically try other open-access locations when that download fails.
+- `--retry-failed` can reuse a previously stored failed PDF URL rather than discovering a fresh location. Connection failures and timeouts need to remain distinguishable from unavailable documents; a connection error does not prove that the local machine has no internet access.
+- Records #138 and #139 share the same reported PDF URL. The relationship between these records and the version of the document actually served requires verification.
+- Extraction warnings from `pypdf` (including CFF Type1 font encoding) are not persisted in the full-text asset status. A `parsed` result confirms that some text was extracted, not that every page is accurate. The local trial with `fontTools` 4.69.0 installed extracted nine pages from #131; the second-page sample was readable, but still contained the typographic ligature `ﬁ`. The effect of the dependency on warnings and text quality has not yet been established by a controlled comparison.
+- The CLI originally displayed only 60 characters of an error or PDF URL. Increasing this to 200 improves diagnostics without changing the stored data or the downloader.
+- HTTP request logs exposed the OpenAlex API key and Unpaywall contact email in query parameters. Signed PDF URLs may also contain sensitive tokens. This is a security issue, separate from download coverage.
+- fontTools 4.69.0 was yanked from PyPI due to incomplete provenance. Version 4.69.1 contains the same code and should be preferred if this dependency is retained.
+- The Full text subset selector controls retrieval only. The results table and its built-in CSV export include all stored full-text records for the project. Independent table filtering is a possible future UI improvement.
+
+**Manual PDF extraction validation:**
+
+- Page 2 of three PDFs (#119, #126 and #131) was manually compared with the corresponding text stored in SQLite.
+- No significant loss of scientific content was identified in the inspected pages.
+- Minor whitespace differences, typographic ligatures, headers, footers and page numbers were observed.
+- Figure captions are retained because they may contain relevant scientific evidence.
+- Future improvements may include header/footer removal, whitespace correction and Unicode ligature normalisation for quote verification, while preserving the original extracted text.
+- Further PDF preprocessing is deferred until after Stage 10 unless it becomes necessary for reliable evidence verification.
+
+### Manual investigation of `not_found` records
+
+- **Paper #120:** The publisher's PDF was accessible through a web browser after Cloudflare verification, despite no OA location being identified by the agent. Anonymous open-access availability was not confirmed.
+- **Paper #123:** Full-text access was obtained through University of Coimbra institutional authentication. The publisher required authentication and consent to share institutional attributes, followed by a temporary signed PDF URL.
+- **Paper #134:** The stored DOI appears to identify a peer-review decision rather than the research article itself. The associated published article (DOI: `10.1039/d5dd00436e`) is openly accessible under CC BY 3.0, and a corresponding bioRxiv preprint is also available.
+- Papers #135 and #136 appear to represent further editorial decision rounds associated with the same article.
+
+**Deferred improvements (after Stage 10):**
+
+- Investigate document-type filtering and relationships between research articles, preprints and peer-review records.
+- Improve deduplication across related publication versions.
+- Consider manual import of legitimately obtained institutional-access PDFs, subject to applicable usage conditions.
+- Avoid persisting temporary signed download URLs, authentication tokens or institutional credentials.
+- Institutional authentication automation is outside the current scope.
+
+The `not_found` status indicates that no OA location was identified by the current discovery mechanism, not that full-text access is impossible.
+
+#### Changes to complete now (before Stage 9)
+
+- [ ] Rotate the exposed OpenAlex key and check that errors and stored diagnostics do not disclose credentials. Keep useful application warnings and errors.
+- [ ] Compare the extracted second-page text with at least three original PDFs, checking page numbering, reading order, missing text, scientific symbols and ligatures. Check stored SQLite text as well as fresh extraction.
+- [ ] Compare extraction warnings and text with and without `fontTools`; declare the dependency in `pyproject.toml` if the comparison confirms its usefulness. Re-extract affected stored pages if necessary before evidence extraction.
+- [ ] Complete the remaining Stage 8 manual checks (including at least three `not_found` records, remaining failed landing URLs and the Streamlit Full text tab) and rerun the automated tests.
+- `discovery/http.py`: Added the Unpaywall `email` parameter to the sensitive parameter exclusion list used in HTTP error messages.
+- `tests/test_http_security.py`: Added three security regression test cases. Sensitive parameter filtering passes, while raw HTTP response and connection exception credential exposure remain expected failures (`xfail`) until Stage 10.
+
+The initial Stage 8 test run reported 106 passing tests. The database migration preserved all 21 records and `git ls-files data` listed only `data/.gitkeep`.
+
+#### Deferred changes (after Stage 10 baseline)
+
+- [ ] Add structured failure reasons while preserving the existing access, download and parse statuses. Suggested categories: `no_direct_pdf`, `no_oa_location`, `http_forbidden`, `http_not_found`, `resource_gone`, `authentication_required`, `payment_required`, `rate_limited`, `server_error`, `not_a_pdf`, `file_too_large`, `timeout`, and `connection_error`. Do not infer a paywall or anti-bot mechanism from HTTP 403 alone; keep manually verified explanations separate.
+- [ ] Consider all eligible open-access locations from OpenAlex and Unpaywall, deduplicate candidate URLs, and try legitimate alternatives when the preferred location fails. Respect access restrictions and licences; do not bypass authentication, paywalls or human-verification challenges.
+- [ ] Improve `--retry-failed`: refresh stale locations when appropriate, use bounded retries/backoff for transient network errors and HTTP 429, and record the actual reason for each new failure. Avoid repeatedly requesting permanently unavailable resources.
+- [ ] Support manual import of legally obtained PDFs with provenance, document/version checks, checksum and page extraction. Investigate shared PDF URLs and stale metadata before associating a document with a paper.
+- [ ] Improve extraction-quality diagnostics (warnings, empty pages, encoding and reading order). Consider Unicode normalisation for evidence-quote matching with regression tests and preservation of the original text; investigate OCR separately if needed.
+- [ ] Add offline regression tests for the above cases and evaluate retrieval coverage on the same corpus before and after changes. Update the CLI, Streamlit and reporting views consistently if structured failure reasons are introduced.
+- [ ] Revisit Stage 7 bibliographic metadata and export audit improvements once the baseline is complete.
+- [ ] HTTP logging security: re-enable the Stage 4. httpx/httpcore logging restrictions or implement credential redaction before the final release. Detailed HTTP logs are intentionally retained during internal development to facilitate debugging.
+- [ ] Implement credential redaction in HTTP response bodies and exception messages while preserving useful diagnostic information. Resolve the two expected failures in `test_http_security.py` and remove their `xfail` markers during Stage 10 security hardening.
+**Rationale for deferral:** The reference versions of `fulltext/download.py`, `locate.py`, `pdf_text.py` and `store.py` are identical in Stages 8, 9 and 10. Stage 9 prefers stored full-text pages but falls back to the abstract if no pages are available; Stage 10 builds the traceable report. The baseline can therefore be completed without redesigning the downloader now. Abstract-only evidence must be clearly labelled and cannot substitute for a full-text assessment. Review and implement the deferred items in a separate improvement phase after Stage 10.
 
 ## Important limitations
 
@@ -139,7 +209,7 @@ Truncamento do terminal: confirmado que [:60] cortava apenas a apresentação. R
 - When a hosted provider such as Groq is used, titles and abstracts are sent to that external service.
 - We are using Groq's free plan limits so it isn´t recommended to do many requests or the status will be 'failed'. If that happens search on data folder file evaluated_dataset.json on the last screening_error you can find the time to reset the RPM limit.
 - We using the model openai/gpt-oss-20b its have:
-
+GROQ:
 | Metric | Meaning | Rate Limit |
 | --- | --- | --- |
 | **RPM** | *Requests Per Minute*  | 30 |
