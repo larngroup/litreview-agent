@@ -104,6 +104,9 @@ Open http://localhost:8501 in your browser. Keep the terminal open while using t
 **Conclusion:** The tested Stage 7 workflow is operational and the CLI/UI counters agree. The BibTeX entries imported successfully, and no invented fields were demonstrated in the inspected sample; missing and generic metadata remain follow-up items. Preserve these observations while proceeding to Stage 8.
 
 ## Stage 8 - 
+
+PC VM do dei configurada e a funcioanr
+
 ### TODO importante
 - No output aparece a API key do OpenAlex dentro do URL, em texto legível (É o XXX):
 ```bash
@@ -124,6 +127,7 @@ Summary: {'parsed': 1, 'download_failed': 2}
 - #122 — Bioinformatics: PDF acessível manualmente, mas download automático bloqueado com HTTP 403.
 - #125 — CSBJ: URL antigo desatualizado; encontraste uma alternativa funcional para descarregar o PDF.
 - #127, #128 e #129: URLs completos identificados, ainda por verificar manualmente.
+falta aqui testes
 
 Truncamento do terminal: confirmado que [:60] cortava apenas a apresentação. Registada a tua alteração para [:200].
 ### TODOs futuros: 
@@ -200,6 +204,7 @@ The initial Stage 8 test run reported 106 passing tests. The database migration 
 - [ ] Revisit Stage 7 bibliographic metadata and export audit improvements once the baseline is complete.
 - [ ] HTTP logging security: re-enable the Stage 4. httpx/httpcore logging restrictions or implement credential redaction before the final release. Detailed HTTP logs are intentionally retained during internal development to facilitate debugging.
 - [ ] Implement credential redaction in HTTP response bodies and exception messages while preserving useful diagnostic information. Resolve the two expected failures in `test_http_security.py` and remove their `xfail` markers during Stage 10 security hardening.
+- [ ] O setuptools avisa que a declaração da licença no pyproject.toml está descontinuada: license = { text = "MIT" } O aviso indica que será necessário atualizar esta configuração até 18 de fevereiro de 2027 -> atualizar
 **Rationale for deferral:** The reference versions of `fulltext/download.py`, `locate.py`, `pdf_text.py` and `store.py` are identical in Stages 8, 9 and 10. Stage 9 prefers stored full-text pages but falls back to the abstract if no pages are available; Stage 10 builds the traceable report. The baseline can therefore be completed without redesigning the downloader now. Abstract-only evidence must be clearly labelled and cannot substitute for a full-text assessment. Review and implement the deferred items in a separate improvement phase after Stage 10.
 
 ## Important limitations
